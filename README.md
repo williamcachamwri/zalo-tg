@@ -124,7 +124,7 @@ Both sides communicate through a set of in-memory and on-disk stores that mainta
 
 | Dependency | Version | Notes |
 |---|---|---|
-| Node.js | >= 18 | ESM support required |
+| Node.js | >= 19 | ESM support required |
 | npm | >= 9 | |
 | ffmpeg | any | Must be in `PATH`; used for OGG→M4A voice conversion |
 | Telegram Bot | — | Created via [@BotFather](https://t.me/BotFather) |
