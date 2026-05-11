@@ -32,6 +32,7 @@ export const config = {
   zalo: {
     credentialsPath: resolvePath(process.env.ZALO_CREDENTIALS_PATH, 'credentials.json'),
     skipMutedGroups: envFlag('ZALO_SKIP_MUTED_GROUPS'),
+    markRepliesSeen: envFlag('ZALO_MARK_REPLIES_SEEN', true),
   },
   dataDir: resolvePath(process.env.DATA_DIR, 'data'),
 } as const;

@@ -3,7 +3,7 @@ import path from 'path';
 import { createReadStream } from 'fs';
 
 import type { ZaloAPI } from '../zalo/types.js';
-import { store, msgStore, userCache, friendsCache, groupsCache, sentMsgStore, pollStore, mediaGroupStore } from '../store.js';
+import { store, msgStore, userCache, friendsCache, groupsCache, sentMsgStore, pollStore, mediaGroupStore, type ZaloQuoteData } from '../store.js';
 import { tgBot } from './bot.js';
 import { config } from '../config.js';
 import { downloadToTemp, cleanTemp, convertToM4a, extractVideoThumbnail } from '../utils/media.js';
@@ -81,6 +81,30 @@ function buildTopicUrl(topicId: number): string {
   const chatId = String(config.telegram.groupId);
   const internalChatId = chatId.startsWith('-100') ? chatId.slice(4) : chatId.replace(/^-/, '');
   return `https://t.me/c/${internalChatId}/${topicId}`;
+}
+
+async function markZaloReplySeen(api: ZaloAPI, quote: ZaloQuoteData | undefined): Promise<void> {
+  if (!config.zalo.markRepliesSeen) return;
+  if (!quote) return;
+
+  try {
+    await api.sendSeenEvent(
+      {
+        msgId:    quote.msgId,
+        cliMsgId: quote.cliMsgId,
+        uidFrom:  quote.uidFrom,
+        idTo:     quote.zaloId,
+        msgType:  quote.msgType,
+        st:       0,
+        at:       0,
+        cmd:      0,
+        ts:       quote.ts,
+      },
+      quote.threadType === 1 ? ThreadType.Group : ThreadType.User,
+    );
+  } catch (err) {
+    console.warn(`[TG→Zalo] Failed to mark replied Zalo message as seen (msgId=${quote.msgId}):`, err);
+  }
 }
 
 /** Track in-progress QR login so we don't stack multiple flows. */
@@ -1110,6 +1134,7 @@ export function setupTelegramHandler(
           if (zaloMsgId !== undefined) {
             sentMsgStore.save(msg.message_id, { msgId: zaloMsgId, zaloId, threadType });
           }
+          await markZaloReplySeen(api, zaloQuote);
         } catch (err) {
           await notifyError('sendMessage', err);
         } finally {
@@ -1202,6 +1227,7 @@ export function setupTelegramHandler(
           if (zaloMsgId !== undefined) {
             sentMsgStore.save(msg.message_id, { msgId: zaloMsgId, zaloId, threadType });
           }
+          await markZaloReplySeen(api, zaloQuote);
           console.log(`[TG→Zalo] Send OK: ${filename}`);
         } catch (err) {
           await notifyError(`sendAttachment(${filename})`, err);
@@ -1257,6 +1283,7 @@ export function setupTelegramHandler(
             // We don't have a single tgMsgId here (multiple), just skip sentMsgStore
             console.log(`[TG→Zalo] Media group sent: ${localPaths.length} files, zaloMsgId=${zaloMsgId}`);
           }
+          await markZaloReplySeen(api, zaloQuote);
         } catch (err) {
           console.error('[TG→Zalo] Media group send failed:', err);
         } finally {
@@ -1377,6 +1404,9 @@ export function setupTelegramHandler(
             if (result?.msgId !== undefined) {
               sentMsgStore.save(msg.message_id, { msgId: result.msgId, zaloId, threadType });
             }
+            const replyToMsgId = msg.reply_to_message?.message_id;
+            const zaloQuote = replyToMsgId !== undefined ? msgStore.getQuote(replyToMsgId) : undefined;
+            await markZaloReplySeen(api, zaloQuote);
           } finally {
             sentMsgStore.unmarkSending(zaloId);
           }
@@ -1415,6 +1445,9 @@ export function setupTelegramHandler(
           if (!voiceUrl) throw new Error('No fileUrl from uploadAttachment');
           console.log(`[TG→Zalo] Sending voice → ${voiceUrl}`);
           await api.sendVoice({ voiceUrl }, zaloId, threadType);
+          const replyToMsgId = msg.reply_to_message?.message_id;
+          const zaloQuote = replyToMsgId !== undefined ? msgStore.getQuote(replyToMsgId) : undefined;
+          await markZaloReplySeen(api, zaloQuote);
           console.log(`[TG→Zalo] Voice sent OK`);
         } catch (err) {
           console.error('[TG→Zalo] Voice convert/send failed, falling back to file:', err);
@@ -1536,10 +1569,16 @@ export function setupTelegramHandler(
             zaloId,
             threadType,
           );
+          const replyToMsgId = msg.reply_to_message?.message_id;
+          const zaloQuote = replyToMsgId !== undefined ? msgStore.getQuote(replyToMsgId) : undefined;
+          await markZaloReplySeen(api, zaloQuote);
           console.log(`[TG→Zalo] Location sent: ${latitude},${longitude}`);
         } catch (err) {
           // Fallback: send as plain text link
           await api.sendMessage({ msg: `📍 ${mapsUrl}` }, zaloId, threadType);
+          const replyToMsgId = msg.reply_to_message?.message_id;
+          const zaloQuote = replyToMsgId !== undefined ? msgStore.getQuote(replyToMsgId) : undefined;
+          await markZaloReplySeen(api, zaloQuote);
         }
         return;
       }
@@ -1557,6 +1596,9 @@ export function setupTelegramHandler(
           const body = `👤 <b>Danh thiếp</b>\nTên: <b>${fullName}</b>\nSĐT: <code>${contact.phone_number}</code>`;
           try {
             await api.sendMessage({ msg: `👤 ${fullName} — ${contact.phone_number}` }, zaloId, threadType);
+            const replyToMsgId = msg.reply_to_message?.message_id;
+            const zaloQuote = replyToMsgId !== undefined ? msgStore.getQuote(replyToMsgId) : undefined;
+            await markZaloReplySeen(api, zaloQuote);
           } catch (err) {
             await notifyError('sendContact', err);
           }
@@ -1714,4 +1756,3 @@ export function setupTelegramHandler(
 }
 
 // Called by setupTelegramHandler, but defined after so we can reference tgBot directly.
-

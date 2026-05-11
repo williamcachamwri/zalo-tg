@@ -168,6 +168,10 @@ DATA_DIR=./data
 # Skip forwarding messages from muted Zalo groups
 # Defaults to false; set to true/1/yes/on to enable
 ZALO_SKIP_MUTED_GROUPS=false
+
+# Mark the replied Zalo message as seen after forwarding a Telegram reply
+# Defaults to true; set to false/0/no/off to disable
+ZALO_MARK_REPLIES_SEEN=true
 ```
 
 ---

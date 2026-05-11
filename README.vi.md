@@ -168,6 +168,10 @@ DATA_DIR=./data
 # Bỏ qua forward tin nhắn từ các nhóm Zalo đã tắt thông báo
 # Mặc định false; đặt true/1/yes/on để bật
 ZALO_SKIP_MUTED_GROUPS=false
+
+# Đánh dấu tin nhắn Zalo gốc là đã đọc sau khi forward reply từ Telegram
+# Mặc định true; đặt false/0/no/off để tắt
+ZALO_MARK_REPLIES_SEEN=true
 ```
 
 ---
