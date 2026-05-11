@@ -7,7 +7,7 @@ const agent = new https.Agent({ family: 4 });
 
 const BOT_COMMANDS = [
   { command: 'login',  description: 'Đăng nhập Zalo bằng QR' },
-  { command: 'search', description: 'Tìm tên, nhóm hoặc số điện thoại' },
+  { command: 'search', description: 'Tìm alias, tên, nhóm hoặc số điện thoại' },
   { command: 'recall', description: 'Thu hồi tin nhắn đã gửi sang Zalo' },
   { command: 'topic',  description: 'Quản lý topic: list | info | delete' },
 ];

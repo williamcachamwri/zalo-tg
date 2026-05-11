@@ -84,6 +84,57 @@ function buildTopicUrl(topicId: number): string {
   return `https://t.me/c/${internalChatId}/${topicId}`;
 }
 
+type ZaloAliasListResponse = {
+  items?: Array<{ userId?: string; alias?: string }>;
+};
+
+async function getAllFriendAliases(api: ZaloAPI): Promise<Array<{ userId: string; alias: string }>> {
+  const items: Array<{ userId: string; alias: string }> = [];
+  const pageSize = 200;
+  const maxPages = 20;
+
+  for (let page = 1; page <= maxPages; page += 1) {
+    const resp = await api.getAliasList(pageSize, page) as ZaloAliasListResponse | undefined;
+    const pageItems = Array.isArray(resp?.items) ? resp.items : [];
+
+    for (const item of pageItems) {
+      const userId = typeof item?.userId === 'string' ? item.userId.trim() : '';
+      const alias = typeof item?.alias === 'string' ? item.alias.trim() : '';
+      if (userId && alias) items.push({ userId, alias });
+    }
+
+    if (pageItems.length < pageSize) break;
+  }
+
+  return items;
+}
+
+function formatFriendSearchLabel(friend: { userId: string; displayName: string; alias?: string }): string {
+  const displayName = friend.displayName.trim() || `Zalo ${friend.userId}`;
+  return aliasCache.label(friend.userId, displayName);
+}
+
+async function refreshFriendsCache(api: ZaloAPI): Promise<void> {
+  const [raw, aliasItems] = await Promise.all([
+    api.getAllFriends() as Promise<Array<{ userId: string; displayName: string }> | undefined>,
+    getAllFriendAliases(api).catch((err) => {
+      console.error('[/search] getAliasList failed:', err);
+      return [];
+    }),
+  ]);
+
+  aliasCache.setAll(aliasItems);
+  const aliasMap = new Map(aliasItems.map((item) => [item.userId, item.alias]));
+
+  if (raw) {
+    friendsCache.set(raw.map((friend) => ({
+      userId: friend.userId,
+      displayName: friend.displayName,
+      alias: aliasMap.get(friend.userId),
+    })));
+  }
+}
+
 /** Track in-progress QR login so we don't stack multiple flows. */
 let qrLoginInProgress = false;
 
@@ -308,13 +359,21 @@ export function setupTelegramHandler(
     if (!query) {
       await ctx.telegram.sendMessage(
         config.telegram.groupId,
-        '🔍 Cú pháp: <code>/search Tên hoặc số điện thoại</code>\nHỗ trợ cả <code>/search ...</code> lẫn <code>/search@zalo_tele_bridge_bot ...</code>.\nVí dụ số: <code>094.495.3545</code> hoặc <code>094 593 5345</code>.',
+        '🔍 Cú pháp: <code>/search Tên lưu, tên thật hoặc số điện thoại</code>\nHỗ trợ cả <code>/search ...</code> lẫn <code>/search@zalo_tele_bridge_bot ...</code>.\nVí dụ số: <code>094.495.3545</code> hoặc <code>094 593 5345</code>.',
         { ...replyOpts, parse_mode: 'HTML' },
       );
       return;
     }
 
     if (!currentApi) { await ctx.telegram.sendMessage(config.telegram.groupId, '❌ Zalo chưa kết nối', replyOpts); return; }
+
+    if (!friendsCache.isFresh()) {
+      try {
+        await refreshFriendsCache(currentApi);
+      } catch (err) {
+        console.error('[/search] refreshFriendsCache failed:', err);
+      }
+    }
 
     const phoneQuery = normalizePhoneSearchQuery(query);
     if (phoneQuery) {
@@ -334,7 +393,10 @@ export function setupTelegramHandler(
           return;
         }
 
-        const displayName = user.display_name || user.zalo_name || `Zalo ${user.uid}`;
+        const cachedFriend = friendsCache.getByUserId(user.uid);
+        const displayName = cachedFriend
+          ? formatFriendSearchLabel(cachedFriend)
+          : aliasCache.label(user.uid, user.display_name || user.zalo_name || `Zalo ${user.uid}`);
         const existingTopicId = store.getTopicByZalo(user.uid, 0);
         const button: { text: string; callback_data: string } = existingTopicId !== undefined
           ? { text: `👤 ${displayName} ✅`, callback_data: `sc:${user.uid}` }
@@ -363,20 +425,6 @@ export function setupTelegramHandler(
         );
         return;
       }
-    }
-
-    // Refresh friends cache if stale
-    if (!friendsCache.isFresh()) {
-      try {
-        const raw = await currentApi.getAllFriends() as Array<{ userId: string; displayName: string }> | undefined;
-        if (raw) {
-          friendsCache.set(raw.map(f => ({
-            userId:      f.userId,
-            displayName: f.displayName,
-            alias:       aliasCache.get(f.userId),
-          })));
-        }
-      } catch (err) { console.error('[/search] getAllFriends failed:', err); }
     }
 
     // Refresh groups cache if stale
@@ -410,7 +458,7 @@ export function setupTelegramHandler(
     if (friendResults.length === 0 && groupResults.length === 0) {
       await ctx.telegram.sendMessage(
         config.telegram.groupId,
-        `🔍 Không tìm thấy bạn bè hay nhóm nào có tên chứa "<b>${query}</b>".`,
+        `🔍 Không tìm thấy bạn bè hay nhóm nào khớp bí danh, tên thật hoặc số điện thoại "<b>${query}</b>".`,
         { ...replyOpts, parse_mode: 'HTML' },
       );
       return;
@@ -419,7 +467,7 @@ export function setupTelegramHandler(
     const buttons: Array<Array<{ text: string; callback_data: string } | { text: string; url: string }>> = [];
     for (const f of friendResults) {
       const existingTopicId = store.getTopicByZalo(f.userId, 0);
-      const label = aliasCache.label(f.userId, f.displayName);
+      const label = formatFriendSearchLabel(f);
       buttons.push([existingTopicId !== undefined
         ? { text: `👤 ${label} ✅`, callback_data: `sc:${f.userId}` }
         : { text: `👤 ${label}`, callback_data: `sc:${f.userId}` }]);

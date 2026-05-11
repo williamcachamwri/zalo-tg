@@ -292,6 +292,23 @@ const FRIENDS_TTL_MS = 5 * 60 * 1000; // 5 minutes
 let _friends:    ZaloFriend[] = [];
 let _friendsTs:  number       = 0;
 
+function normalizeFriendSearchValue(value: string): string {
+  return value.toLowerCase().normalize('NFD').replace(/\p{Mn}/gu, '').trim();
+}
+
+function rankFriendSearchMatch(friend: ZaloFriend, query: string): number {
+  const alias = normalizeFriendSearchValue(friend.alias ?? '');
+  const name  = normalizeFriendSearchValue(friend.displayName);
+
+  if (alias && alias === query)         return 600;
+  if (alias && alias.startsWith(query)) return 500;
+  if (alias && alias.includes(query))   return 400;
+  if (name === query)                   return 300;
+  if (name.startsWith(query))           return 200;
+  if (name.includes(query))             return 100;
+  return -1;
+}
+
 export const friendsCache = {
   /** Store a fresh friends list. */
   set(list: ZaloFriend[]): void {
@@ -299,20 +316,21 @@ export const friendsCache = {
     _friendsTs = Date.now();
   },
 
-  /**
-   * Search by substring (case/diacritic-insensitive).
-   * Searches alias first, falls back to displayName.
-   * Returns up to `limit` results.
-   */
+  getByUserId(userId: string): ZaloFriend | undefined {
+    return _friends.find(friend => friend.userId === userId);
+  },
+
+  /** Search by alias first, then real name (case/diacritic-insensitive). */
   search(query: string, limit = 10): ZaloFriend[] {
-    const q = query.toLowerCase().normalize('NFD').replace(/\p{Mn}/gu, '');
+    const q = normalizeFriendSearchValue(query);
+    if (!q) return [];
+
     return _friends
-      .filter(f => {
-        const searchName = (f.alias || f.displayName).toLowerCase().normalize('NFD').replace(/\p{Mn}/gu, '');
-        const realName   = f.displayName.toLowerCase().normalize('NFD').replace(/\p{Mn}/gu, '');
-        return searchName.includes(q) || realName.includes(q);
-      })
-      .slice(0, limit);
+      .map((friend, index) => ({ friend, index, score: rankFriendSearchMatch(friend, q) }))
+      .filter((entry) => entry.score >= 0)
+      .sort((a, b) => b.score - a.score || a.index - b.index)
+      .slice(0, limit)
+      .map((entry) => entry.friend);
   },
 
   /** True if the cache is still fresh. */
