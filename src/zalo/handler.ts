@@ -1102,9 +1102,16 @@ ${escapeHtml(photoCaption)}`
     '':          '❌',  // remove reaction
   };
 
+  const REACTION_DEDUPE_TTL = 5 * 1000;
+  const _recentReactionNotifications = new Map<string, number>();
+
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   api.listener.on('reaction', async (reaction: any) => {
     try {
+      // Reactions created by this bridge (for TG→Zalo sync) are echoed back by
+      // Zalo with isSelf=true. Do not turn those echoes into Telegram messages.
+      if (reaction?.isSelf) return;
+
       const data = reaction?.data;
       const rIcon: string = data?.content?.rIcon ?? '';
       const emoji = REACTION_EMOJI[rIcon] ?? rIcon;
@@ -1115,6 +1122,15 @@ ${escapeHtml(photoCaption)}`
       const gMsgIds: Array<{ gMsgID?: string | number }> = data?.content?.rMsg ?? [];
       const zaloMsgId = String(gMsgIds[0]?.gMsgID ?? '');
       if (!zaloMsgId) return;
+
+      const reactionKey = `${data?.uidFrom ?? ''}:${zaloMsgId}:${rIcon}`;
+      const now = Date.now();
+      const recentReactionAt = _recentReactionNotifications.get(reactionKey);
+      if (recentReactionAt !== undefined && now - recentReactionAt < REACTION_DEDUPE_TTL) return;
+      _recentReactionNotifications.set(reactionKey, now);
+      for (const [key, ts] of _recentReactionNotifications) {
+        if (now - ts >= REACTION_DEDUPE_TTL) _recentReactionNotifications.delete(key);
+      }
 
       const tgMsgId = msgStore.getTgMsgId(zaloMsgId) ?? sentMsgStore.getByZaloMsgId(zaloMsgId);
       if (tgMsgId === undefined) {
@@ -1130,22 +1146,6 @@ ${escapeHtml(photoCaption)}`
       const rawName = typeof data?.dName === 'string' ? data.dName.trim() : '';
       const actorUid = typeof data?.uidFrom === 'string' ? data.uidFrom : undefined;
       const actorName = rawName || await resolveUserDisplayName(api, actorUid, 'ai đó');
-
-      // Auto mirror reaction in DM conversations only
-      if (type === 0) {
-        try {
-          await api.addReaction(
-            rIcon as import('zca-js').Reactions,
-            {
-              data: { msgId: zaloMsgId, cliMsgId: '' },
-              threadId: String(zaloId),
-              type: 0,
-            },
-          );
-        } catch (err) {
-          console.warn('[ZaloHandler] Auto-react failed:', err);
-        }
-      }
 
       // Send reaction emoji as a reply to the forwarded TG message
       await tg.sendMessage(
