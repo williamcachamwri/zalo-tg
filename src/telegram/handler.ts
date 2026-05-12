@@ -627,11 +627,22 @@ export function setupTelegramHandler(
     }
 
     try {
-      // Lời mời nhóm đang chờ
-      const [sentReqs, groupInvites] = await Promise.all([
+      const [sentReqs, recvRecommends, groupInvites] = await Promise.all([
         currentApi.getSentFriendRequest() as Promise<Record<string, {
           zaloName: string; displayName: string; fReqInfo: { message: string; time: number };
         }>>,
+        currentApi.getFriendRecommendations() as Promise<{
+          recommItems?: Array<{
+            recommItemType: number;
+            dataInfo: {
+              userId: string;
+              zaloName: string;
+              displayName: string;
+              recommType: number;  // 2 = ReceivedFriendRequest
+              recommInfo?: { message?: string | null };
+            };
+          }>;
+        }>,
         currentApi.getGroupInviteBoxList({ invPerPage: 20 }) as Promise<{
           invitations: Array<{
             groupInfo: { groupId: string; name: string; totalMember: number };
@@ -643,45 +654,64 @@ export function setupTelegramHandler(
       ]);
 
       const parts: string[] = [];
+      const inlineKeyboards: Array<[{ text: string; callback_data: string }]> = [];
+
+      // Lời mời kết bạn nhận được (recommType === 2)
+      const receivedReqs = (recvRecommends?.recommItems ?? [])
+        .filter(item => item.dataInfo?.recommType === 2)
+        .map(item => item.dataInfo);
+      if (receivedReqs.length > 0) {
+        parts.push(`📥 <b>Lời mời kết bạn nhận được (${receivedReqs.length})</b>`);
+        for (const u of receivedReqs.slice(0, 20)) {
+          const name = escapeHtml(u.displayName || u.zaloName || u.userId);
+          const msg  = u.recommInfo?.message ? ` — "${escapeHtml(u.recommInfo.message)}"` : '';
+          parts.push(`• ${name}${msg}`);
+          inlineKeyboards.push([{
+            text: `✅ Chấp nhận ${u.displayName || u.zaloName}`,
+            callback_data: `afr:${u.userId}`,
+          }]);
+        }
+        if (receivedReqs.length > 20) parts.push(`  <i>... và ${receivedReqs.length - 20} người khác</i>`);
+      }
 
       // Lời mời kết bạn đã gửi
       const sentList = Object.values(sentReqs ?? {});
       if (sentList.length > 0) {
-        parts.push(`📤 <b>Lời mời kết bạn đã gửi (${sentList.length})</b>`);
-        for (const u of sentList.slice(0, 15)) {
-          const name = u.displayName || u.zaloName;
-          const msg  = u.fReqInfo?.message ? ` — "${u.fReqInfo.message}"` : '';
+        parts.push(`\n📤 <b>Lời mời kết bạn đã gửi (${sentList.length})</b>`);
+        for (const u of sentList.slice(0, 10)) {
+          const name = escapeHtml(u.displayName || u.zaloName);
+          const msg  = u.fReqInfo?.message ? ` — "${escapeHtml(u.fReqInfo.message)}"` : '';
           parts.push(`• ${name}${msg}`);
         }
+        if (sentList.length > 10) parts.push(`  <i>... và ${sentList.length - 10} người khác</i>`);
       }
 
       // Lời mời tham gia nhóm
       const invites = groupInvites?.invitations ?? [];
       if (invites.length > 0) {
         parts.push(`\n📬 <b>Lời mời tham gia nhóm (${invites.length})</b>`);
-        const groupButtons: Array<[{ text: string; callback_data: string }]> = [];
-        for (const inv of invites.slice(0, 15)) {
+        for (const inv of invites.slice(0, 10)) {
           const g   = inv.groupInfo;
           const exp = new Date(Number(inv.expiredTs) * 1000).toLocaleDateString('vi-VN');
-          parts.push(`• 👥 <b>${g.name}</b> (${g.totalMember} TV)\n  Mời bởi: ${inv.inviterInfo.dName} · HH: ${exp}`);
-          groupButtons.push([{
+          parts.push(`• 👥 <b>${escapeHtml(g.name)}</b> (${g.totalMember} TV)\n  Mời bởi: ${escapeHtml(inv.inviterInfo.dName)} · HH: ${exp}`);
+          inlineKeyboards.push([{
             text: `✅ Tham gia ${g.name}`,
             callback_data: `jgi:${g.groupId}`,
           }]);
         }
-
-        if (parts.length === 0) parts.push('✅ Không có lời mời nào đang chờ.');
-
-        await ctx.telegram.sendMessage(
-          config.telegram.groupId,
-          parts.join('\n'),
-          { ...replyOpts, parse_mode: 'HTML', reply_markup: { inline_keyboard: groupButtons } },
-        );
-        return;
       }
 
       if (parts.length === 0) parts.push('✅ Không có lời mời nào đang chờ.');
-      await ctx.telegram.sendMessage(config.telegram.groupId, parts.join('\n'), { ...replyOpts, parse_mode: 'HTML' });
+
+      await ctx.telegram.sendMessage(
+        config.telegram.groupId,
+        parts.join('\n'),
+        {
+          ...replyOpts,
+          parse_mode: 'HTML',
+          ...(inlineKeyboards.length > 0 ? { reply_markup: { inline_keyboard: inlineKeyboards } } : {}),
+        },
+      );
     } catch (err) {
       console.error('[/friendrequests]', err);
       await ctx.telegram.sendMessage(config.telegram.groupId, '❌ Lỗi lấy danh sách lời mời.', replyOpts);
@@ -713,13 +743,16 @@ export function setupTelegramHandler(
     }
 
     try {
-      // Thử lấy info link trước
-      const linkInfo = await currentApi.getGroupLinkInfo(link) as {
-        groupInfo?: { name?: string; totalMember?: number };
-      } | undefined;
-
-      const groupName = linkInfo?.groupInfo?.name;
-      const totalMember = linkInfo?.groupInfo?.totalMember;
+      // Thử lấy info link trước (API cần object { link })
+      let groupName: string | undefined;
+      let totalMember: number | undefined;
+      try {
+        const linkInfo = await currentApi.getGroupLinkInfo({ link }) as {
+          name?: string; totalMember?: number;
+        } | undefined;
+        groupName   = linkInfo?.name;
+        totalMember = linkInfo?.totalMember;
+      } catch { /* info fetch failure is non-fatal */ }
 
       await currentApi.joinGroupLink(link);
 
@@ -727,15 +760,22 @@ export function setupTelegramHandler(
       await ctx.telegram.sendMessage(
         config.telegram.groupId,
         groupName
-          ? `✅ Đã tham gia nhóm <b>${groupName}</b>${memberText}!`
+          ? `✅ Đã tham gia nhóm <b>${escapeHtml(groupName)}</b>${memberText}!`
           : '✅ Đã gửi yêu cầu tham gia nhóm thành công!',
         { ...replyOpts, parse_mode: 'HTML' },
       );
-      // Invalidate group cache
       groupsCache.set([]);
     } catch (err) {
+      const errMsg = err instanceof Error ? err.message : String(err);
       console.error('[/joingroup]', err);
-      await ctx.telegram.sendMessage(config.telegram.groupId, '❌ Không thể tham gia nhóm. Link có thể đã hết hạn hoặc không hợp lệ.', replyOpts);
+      // code 178 = already a member, 240 = requires admin approval
+      if (errMsg.includes('178')) {
+        await ctx.telegram.sendMessage(config.telegram.groupId, '⚠️ Bạn đã là thành viên nhóm này rồi.', replyOpts);
+      } else if (errMsg.includes('240')) {
+        await ctx.telegram.sendMessage(config.telegram.groupId, '⏳ Nhóm yêu cầu duyệt thành viên. Yêu cầu tham gia đã được gửi đi.', replyOpts);
+      } else {
+        await ctx.telegram.sendMessage(config.telegram.groupId, '❌ Không thể tham gia nhóm. Link có thể đã hết hạn hoặc không hợp lệ.', replyOpts);
+      }
     }
   });
 
@@ -923,6 +963,21 @@ export function setupTelegramHandler(
       } catch (err) {
         console.error('[cb/af]', err);
         await ctx.answerCbQuery('❌ Gửi lời mời thất bại');
+      }
+      return;
+    }
+
+    // ── afr: accept friend request ────────────────────────────────────────────
+    if (data?.startsWith('afr:')) {
+      const userId = data.slice(4);
+      if (!currentApi) { await ctx.answerCbQuery('❌ Zalo chưa kết nối'); return; }
+      try {
+        await currentApi.acceptFriendRequest(userId);
+        await ctx.answerCbQuery('✅ Đã chấp nhận lời mời kết bạn!');
+        await ctx.editMessageReplyMarkup(undefined);
+      } catch (err) {
+        console.error('[cb/afr]', err);
+        await ctx.answerCbQuery('❌ Không thể chấp nhận lời mời');
       }
       return;
     }
