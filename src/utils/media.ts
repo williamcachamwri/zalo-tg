@@ -8,10 +8,18 @@ import os from 'os';
 
 const TMP_DIR = path.join(os.tmpdir(), 'zalo-tg');
 
+function makeTempPath(baseName: string): string {
+  return path.join(TMP_DIR, `${Date.now()}_${Math.random().toString(36).slice(2, 7)}_${baseName}`);
+}
+
+function sanitizeName(name: string): string {
+  return name.replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 128);
+}
+
 /** Download a remote URL to a temp file. Returns the local file path.
  *  When using a local Telegram Bot API server (--local flag), getFileLink()
- *  returns a file:// URL pointing to the server's working directory.
- *  In that case we copy the file directly instead of downloading via HTTP.
+ *  returns a file:// URL — the file is copied from server dir to temp.
+ *  Use withTempDownload() to auto-cleanup both copy and source on completion.
  */
 export async function downloadToTemp(url: string, fileName?: string, retries = 3): Promise<string> {
   mkdirSync(TMP_DIR, { recursive: true });
@@ -19,33 +27,22 @@ export async function downloadToTemp(url: string, fileName?: string, retries = 3
   // Local Bot API server returns file:// paths — copy directly, no HTTP needed
   if (url.startsWith('file:')) {
     const srcPath = fileURLToPath(url);
-    const baseName = (fileName ?? path.basename(srcPath))
-      .replace(/[^a-zA-Z0-9._-]/g, '_')
-      .slice(0, 128);
-    const destPath = path.join(TMP_DIR, `${Date.now()}_${Math.random().toString(36).slice(2, 7)}_${baseName}`);
+    const baseName = sanitizeName(fileName ?? path.basename(srcPath));
+    const destPath = makeTempPath(baseName);
     copyFileSync(srcPath, destPath);
     return destPath;
   }
 
-  // Sanitize filename and add a unique prefix so concurrent downloads
-  // with the same logical name (e.g. multiple 'photo.jpg' in a media group)
-  // do not overwrite each other.
-  const baseName = (fileName ?? `download_${Date.now()}`)
-    .replace(/[^a-zA-Z0-9._-]/g, '_')
-    .slice(0, 128);
-
+  const baseName = sanitizeName(fileName ?? `download_${Date.now()}`);
   let lastErr: unknown;
   for (let attempt = 0; attempt < retries; attempt++) {
-    if (attempt > 0) {
-      // Exponential backoff: 500ms, 1500ms, ...
-      await new Promise(r => setTimeout(r, 500 * attempt * attempt));
-    }
+    if (attempt > 0) await new Promise(r => setTimeout(r, 500 * attempt * attempt));
 
-    const filePath = path.join(TMP_DIR, `${Date.now()}_${Math.random().toString(36).slice(2, 7)}_${baseName}`);
+    const filePath = makeTempPath(baseName);
     try {
       const resp = await axios.get<NodeJS.ReadableStream>(url, {
         responseType: 'stream',
-        timeout: 30_000,
+        timeout: 120_000,
         headers: { 'User-Agent': 'Mozilla/5.0 (compatible; ZaloTGBridge/1.0)' },
       });
 
@@ -75,7 +72,53 @@ export async function downloadToTemp(url: string, fileName?: string, retries = 3
 
 /** Remove a temp file, ignoring errors. */
 export async function cleanTemp(filePath: string): Promise<void> {
-  try { await unlink(filePath); } catch { /* ignore */ }
+  await unlink(filePath).catch(() => {});
+}
+
+/**
+ * Download/copy a URL to a temp file, run fn(localPath), then clean up.
+ * For file:// URLs (local Telegram Bot API server), also deletes the source
+ * file from the server's working directory after use.
+ * Guarantees cleanup even if fn throws.
+ */
+export async function withTempDownload<T>(
+  url: string,
+  fileName: string | undefined,
+  fn: (localPath: string) => Promise<T>,
+): Promise<T> {
+  const localPath = await downloadToTemp(url, fileName);
+  try {
+    return await fn(localPath);
+  } finally {
+    await unlink(localPath).catch(() => {});
+    // For local server file:// URLs, also remove source from server's data dir
+    if (url.startsWith('file:')) {
+      await unlink(fileURLToPath(url)).catch(() => {});
+    }
+  }
+}
+
+/**
+ * Same as withTempDownload but for multiple URLs in parallel.
+ * All temp files (and file:// sources) are cleaned up after fn returns.
+ */
+export async function withTempDownloads<T>(
+  items: Array<{ url: string; fileName?: string }>,
+  fn: (localPaths: string[]) => Promise<T>,
+): Promise<T> {
+  mkdirSync(TMP_DIR, { recursive: true });
+  const localPaths = await Promise.all(items.map(i => downloadToTemp(i.url, i.fileName)));
+  try {
+    return await fn(localPaths);
+  } finally {
+    await Promise.all(localPaths.map(p => unlink(p).catch(() => {})));
+    // Clean file:// sources
+    await Promise.all(
+      items
+        .filter(i => i.url.startsWith('file:'))
+        .map(i => unlink(fileURLToPath(i.url)).catch(() => {})),
+    );
+  }
 }
 
 /**

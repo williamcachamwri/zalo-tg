@@ -6,7 +6,7 @@ import type { ZaloAPI } from '../zalo/types.js';
 import { store, msgStore, userCache, friendsCache, groupsCache, sentMsgStore, pollStore, mediaGroupStore, reactionEchoStore, aliasCache } from '../store.js';
 import { tgBot } from './bot.js';
 import { config } from '../config.js';
-import { downloadToTemp, cleanTemp, convertToM4a, extractVideoThumbnail } from '../utils/media.js';
+import { downloadToTemp, cleanTemp, withTempDownload, withTempDownloads, convertToM4a, extractVideoThumbnail } from '../utils/media.js';
 import { triggerQRLogin } from '../zalo/client.js';
 import { escapeHtml } from '../utils/format.js';
 
@@ -1361,61 +1361,54 @@ export function setupTelegramHandler(
           if (isTooBig) { await notifyTooBig(filename, fileSize); return; }
           throw err;
         }
-        const localPath = await downloadToTemp(fileLink.toString(), filename);
         sentMsgStore.markSending(zaloId);
         try {
-          console.log(`[TG→Zalo] Sending ${filename} → zaloId=${zaloId} type=${threadType}`);
-          const withTimeout = <T>(p: Promise<T>) => Promise.race([
-            p,
-            new Promise<never>((_, reject) =>
-              setTimeout(() => reject(new Error('Send timeout (30s)')), 30_000),
-            ),
-          ]);
+          await withTempDownload(fileLink.toString(), filename, async (localPath) => {
+            console.log(`[TG→Zalo] Sending ${filename} → zaloId=${zaloId} type=${threadType}`);
+            const withTimeout = <T>(p: Promise<T>) => Promise.race([
+              p,
+              new Promise<never>((_, reject) =>
+                setTimeout(() => reject(new Error('Send timeout (30s)')), 30_000),
+              ),
+            ]);
 
-          // zca-js splits internally when msg is non-empty + quote is set:
-          //   1) sends caption+quote as text (reply indicator in Zalo)
-          //   2) sends attachment without quote
-          // When no caption, skip the quote — adding a placeholder text just to
-          // carry the quote would create visible noise in the conversation.
-          const effectiveCaption = caption ?? '';
+            const effectiveCaption = caption ?? '';
 
-          const sendResult = await withTimeout(api.sendMessage(
-            {
-              msg: effectiveCaption,
-              attachments: [localPath],
-              ...(effectiveCaption.length && zaloQuote ? { quote: zaloQuote } : {}),
-              ...(captionMentions?.length ? { mentions: captionMentions } : {}),
-            },
-            zaloId,
-            threadType,
-          )).catch(async (err: unknown) => {
-            // Code 114 with quote: quote data incompatible with this message type.
-            // Retry without quote so the attachment still goes through.
-            if ((err as { code?: number }).code === 114) {
-              console.warn('[TG→Zalo] code 114 on attachment+quote, retrying without quote');
-              return withTimeout(api.sendMessage(
-                {
-                  msg: effectiveCaption,
-                  attachments: [localPath],
-                  ...(captionMentions?.length ? { mentions: captionMentions } : {}),
-                },
-                zaloId,
-                threadType,
-              ));
+            const sendResult = await withTimeout(api.sendMessage(
+              {
+                msg: effectiveCaption,
+                attachments: [localPath],
+                ...(effectiveCaption.length && zaloQuote ? { quote: zaloQuote } : {}),
+                ...(captionMentions?.length ? { mentions: captionMentions } : {}),
+              },
+              zaloId,
+              threadType,
+            )).catch(async (err: unknown) => {
+              if ((err as { code?: number }).code === 114) {
+                console.warn('[TG→Zalo] code 114 on attachment+quote, retrying without quote');
+                return withTimeout(api.sendMessage(
+                  {
+                    msg: effectiveCaption,
+                    attachments: [localPath],
+                    ...(captionMentions?.length ? { mentions: captionMentions } : {}),
+                  },
+                  zaloId,
+                  threadType,
+                ));
+              }
+              throw err;
+            }) as { message?: { msgId?: number } | null; attachment?: Array<{ msgId?: number }> };
+
+            const zaloMsgId = sendResult?.message?.msgId ?? sendResult?.attachment?.[0]?.msgId;
+            if (zaloMsgId !== undefined) {
+              sentMsgStore.save(msg.message_id, { msgId: zaloMsgId, zaloId, threadType });
             }
-            throw err;
-          }) as { message?: { msgId?: number } | null; attachment?: Array<{ msgId?: number }> };
-
-          const zaloMsgId = sendResult?.message?.msgId ?? sendResult?.attachment?.[0]?.msgId;
-          if (zaloMsgId !== undefined) {
-            sentMsgStore.save(msg.message_id, { msgId: zaloMsgId, zaloId, threadType });
-          }
-          console.log(`[TG→Zalo] Send OK: ${filename}`);
+            console.log(`[TG→Zalo] Send OK: ${filename}`);
+          });
         } catch (err) {
           await notifyError(`sendAttachment(${filename})`, err);
         } finally {
           sentMsgStore.unmarkSending(zaloId);
-          await cleanTemp(localPath);
         }
       };
 
@@ -1457,35 +1450,37 @@ export function setupTelegramHandler(
         const zaloQuote = replyMsgId !== undefined ? msgStore.getQuote(replyMsgId) : undefined;
         const caption = items[0]?.caption ?? '';
         const capMentions = items[0]?.captionMentions;
-        const localPaths: string[] = [];
+        const items_with_links: Array<{ url: string; fileName: string }> = [];
+        for (const item of items) {
+          if ((item.fileSize ?? 0) > 20 * 1024 * 1024) continue;
+          try {
+            const fileLink = await tgBot.telegram.getFileLink(item.fileId);
+            items_with_links.push({ url: fileLink.toString(), fileName: item.fname });
+          } catch { continue; }
+        }
+        if (items_with_links.length === 0) return;
         try {
-          for (const item of items) {
-            if ((item.fileSize ?? 0) > 20 * 1024 * 1024) continue; // skip oversized
-            let fileLink: URL;
-            try { fileLink = await tgBot.telegram.getFileLink(item.fileId); }
-            catch { continue; }
-            localPaths.push(await downloadToTemp(fileLink.toString(), item.fname));
-          }
-          if (localPaths.length === 0) return;
-          const sendResult = await api.sendMessage(
-            {
-              msg: caption,
-              attachments: localPaths,
-              ...(zaloQuote ? { quote: zaloQuote } : {}),
-              ...(capMentions?.length ? { mentions: capMentions } : {}),
+          await withTempDownloads(
+            items_with_links.map(i => ({ url: i.url, fileName: i.fileName })),
+            async (localPaths) => {
+              const sendResult = await api.sendMessage(
+                {
+                  msg: caption,
+                  attachments: localPaths,
+                  ...(zaloQuote ? { quote: zaloQuote } : {}),
+                  ...(capMentions?.length ? { mentions: capMentions } : {}),
+                },
+                meta.zaloId,
+                meta.threadType === 1 ? ThreadType.Group : ThreadType.User,
+              );
+              const zaloMsgId = sendResult?.message?.msgId ?? sendResult?.attachment?.[0]?.msgId;
+              if (zaloMsgId !== undefined) {
+                console.log(`[TG→Zalo] Media group sent: ${localPaths.length} files, zaloMsgId=${zaloMsgId}`);
+              }
             },
-            meta.zaloId,
-            meta.threadType === 1 ? ThreadType.Group : ThreadType.User,
           );
-          const zaloMsgId = sendResult?.message?.msgId ?? sendResult?.attachment?.[0]?.msgId;
-          if (zaloMsgId !== undefined) {
-            // We don't have a single tgMsgId here (multiple), just skip sentMsgStore
-            console.log(`[TG→Zalo] Media group sent: ${localPaths.length} files, zaloMsgId=${zaloMsgId}`);
-          }
         } catch (err) {
           console.error('[TG→Zalo] Media group send failed:', err);
-        } finally {
-          for (const lp of localPaths) await cleanTemp(lp);
         }
       };
 
@@ -1555,64 +1550,60 @@ export function setupTelegramHandler(
           if (isTooBig) { await notifyTooBig(fname, vid.file_size); return; }
           throw err;
         }
-        const localVideoPath = await downloadToTemp(fileLink.toString(), fname);
-        let localThumbPath: string | undefined;
-        try {
-          // Extract first frame as thumbnail
-          try { localThumbPath = await extractVideoThumbnail(localVideoPath); } catch { /* no thumb */ }
+        const localVideoUrl = fileLink.toString();
+        await withTempDownload(localVideoUrl, fname, async (localVideoPath) => {
+          let localThumbPath: string | undefined;
+          try {
+            try { localThumbPath = await extractVideoThumbnail(localVideoPath); } catch { /* no thumb */ }
 
-          // Upload video to Zalo CDN
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          const videoUploads: any[] = await api.uploadAttachment([localVideoPath], zaloId, threadType);
-          const videoUpload = videoUploads?.find((r: { fileType?: string }) => r.fileType === 'video') as
-            { fileUrl?: string } | undefined;
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const videoUploads: any[] = await api.uploadAttachment([localVideoPath], zaloId, threadType);
+            const videoUpload = videoUploads?.find((r: { fileType?: string }) => r.fileType === 'video') as
+              { fileUrl?: string } | undefined;
 
-          if (!videoUpload?.fileUrl) {
-            // Fallback: send as file attachment
-            await sendAttachment(vid.file_id, fname, vid.file_size, cap, capMentions);
-            return;
-          }
+            if (!videoUpload?.fileUrl) {
+              await sendAttachment(vid.file_id, fname, vid.file_size, cap, capMentions);
+              return;
+            }
 
-          // Upload thumbnail image to Zalo CDN
-          let thumbUrl = videoUpload.fileUrl; // worst-case: same URL (shows broken thumb but video works)
-          if (localThumbPath) {
+            let thumbUrl = videoUpload.fileUrl;
+            if (localThumbPath) {
+              try {
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                const thumbUploads: any[] = await api.uploadAttachment([localThumbPath], zaloId, threadType);
+                const tu = thumbUploads?.[0] as { normalUrl?: string } | undefined;
+                if (tu?.normalUrl) thumbUrl = tu.normalUrl;
+              } catch { /* keep fallback thumbUrl */ }
+            }
+
+            sentMsgStore.markSending(zaloId);
             try {
               // eslint-disable-next-line @typescript-eslint/no-explicit-any
-              const thumbUploads: any[] = await api.uploadAttachment([localThumbPath], zaloId, threadType);
-              const tu = thumbUploads?.[0] as { normalUrl?: string } | undefined;
-              if (tu?.normalUrl) thumbUrl = tu.normalUrl;
-            } catch { /* keep fallback thumbUrl */ }
-          }
-
-          sentMsgStore.markSending(zaloId);
-          try {
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            const result = await (api.sendVideo as (...a: any[]) => Promise<{ msgId?: number }>)(
-              {
-                videoUrl:     videoUpload.fileUrl,
-                thumbnailUrl: thumbUrl,
-                width:        vid.width,
-                height:       vid.height,
-                duration:     (vid.duration ?? 0) * 1000,
-                msg:          cap ?? '',
-              },
-              zaloId,
-              threadType,
-            );
-            if (result?.msgId !== undefined) {
-              sentMsgStore.save(msg.message_id, { msgId: result.msgId, zaloId, threadType });
+              const result = await (api.sendVideo as (...a: any[]) => Promise<{ msgId?: number }>)(
+                {
+                  videoUrl:     videoUpload.fileUrl,
+                  thumbnailUrl: thumbUrl,
+                  width:        vid.width,
+                  height:       vid.height,
+                  duration:     (vid.duration ?? 0) * 1000,
+                  msg:          cap ?? '',
+                },
+                zaloId,
+                threadType,
+              );
+              if (result?.msgId !== undefined) {
+                sentMsgStore.save(msg.message_id, { msgId: result.msgId, zaloId, threadType });
+              }
+            } finally {
+              sentMsgStore.unmarkSending(zaloId);
             }
+          } catch (err) {
+            console.error('[TG→Zalo] sendVideo failed, fallback to attachment:', err);
+            try { await sendAttachment(vid.file_id, fname, vid.file_size, cap, capMentions); } catch { /* ignore */ }
           } finally {
-            sentMsgStore.unmarkSending(zaloId);
+            if (localThumbPath) await cleanTemp(localThumbPath);
           }
-        } catch (err) {
-          console.error('[TG→Zalo] sendVideo failed, fallback to attachment:', err);
-          // Fallback: send as regular file
-          try { await sendAttachment(vid.file_id, fname, vid.file_size, cap, capMentions); } catch { /* ignore */ }
-        } finally {
-          await cleanTemp(localVideoPath);
-          if (localThumbPath) await cleanTemp(localThumbPath);
-        }
+        });
         return;
       }
 
@@ -1630,24 +1621,23 @@ export function setupTelegramHandler(
           if (isTooBig) { await notifyTooBig(`voice_${Date.now()}.ogg`, msg.voice.file_size); return; }
           throw err;
         }
-        const oggPath  = await downloadToTemp(fileLink.toString(), `voice_${Date.now()}.ogg`);
-        let m4aPath: string | undefined;
-        try {
-          m4aPath = await convertToM4a(oggPath);
-          // Upload to Zalo CDN to get a voiceUrl
-          const uploaded = await api.uploadAttachment(m4aPath, zaloId, threadType) as Array<{ fileUrl?: string }>;
-          const voiceUrl = uploaded[0]?.fileUrl;
-          if (!voiceUrl) throw new Error('No fileUrl from uploadAttachment');
-          console.log(`[TG→Zalo] Sending voice → ${voiceUrl}`);
-          await api.sendVoice({ voiceUrl }, zaloId, threadType);
-          console.log(`[TG→Zalo] Voice sent OK`);
-        } catch (err) {
-          console.error('[TG→Zalo] Voice convert/send failed, falling back to file:', err);
-          await sendAttachment(msg.voice.file_id, `voice_${Date.now()}.ogg`);
-        } finally {
-          await cleanTemp(oggPath);
-          if (m4aPath) await cleanTemp(m4aPath);
-        }
+        await withTempDownload(fileLink.toString(), `voice_${Date.now()}.ogg`, async (oggPath) => {
+          let m4aPath: string | undefined;
+          try {
+            m4aPath = await convertToM4a(oggPath);
+            const uploaded = await api.uploadAttachment(m4aPath, zaloId, threadType) as Array<{ fileUrl?: string }>;
+            const voiceUrl = uploaded[0]?.fileUrl;
+            if (!voiceUrl) throw new Error('No fileUrl from uploadAttachment');
+            console.log(`[TG→Zalo] Sending voice → ${voiceUrl}`);
+            await api.sendVoice({ voiceUrl }, zaloId, threadType);
+            console.log(`[TG→Zalo] Voice sent OK`);
+          } catch (err) {
+            console.error('[TG→Zalo] Voice convert/send failed, falling back to file:', err);
+            await sendAttachment(msg.voice.file_id, `voice_${Date.now()}.ogg`);
+          } finally {
+            if (m4aPath) await cleanTemp(m4aPath);
+          }
+        });
         return;
       }
 
