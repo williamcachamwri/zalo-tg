@@ -9,7 +9,8 @@ import { store } from '../store.js';
 import { tgBot } from '../telegram/bot.js';
 import { config } from '../config.js';
 import { downloadToTemp, cleanTemp } from '../utils/media.js';
-import { applyMentionsHtml, formatGroupMsgHtml, formatGroupMsg, groupCaption, topicName, truncate, escapeHtml } from '../utils/format.js';
+import { applyMentionsHtml, applyZaloMarkupHtml, formatGroupMsgHtml, formatGroupMsg, groupCaption, topicName, truncate, escapeHtml } from '../utils/format.js';
+import type { ZaloStyle } from '../utils/format.js';
 import { msgStore, userCache, pollStore, sentMsgStore, zaloAlbumStore, reactionEchoStore, reactionSummaryStore, aliasCache, type ZaloQuoteData } from '../store.js';
 import { tgQueue } from '../utils/tgQueue.js';
 
@@ -555,8 +556,23 @@ export async function setupZaloHandler(api: ZaloAPI): Promise<void> {
         const body = text ?? (typeof msg.data.content === 'string' ? msg.data.content : '');
         if (!body.trim()) return;
         const mentions = msg.data.mentions;
-        const bodyHtml = mentions?.length
-          ? applyMentionsHtml(truncate(body), mentions)
+
+        // Parse Zalo text-style metadata (bold, italic, underline, strike)
+        // The server stores it as a JSON string in the `textProperties` field
+        // which is not typed in TMessage but IS present in the raw data.
+        let styles: ZaloStyle[] | undefined;
+        try {
+          const rawProps = (msg.data as unknown as Record<string, unknown>).textProperties;
+          if (typeof rawProps === 'string' && rawProps) {
+            const parsed = JSON.parse(rawProps) as { styles?: ZaloStyle[] };
+            if (Array.isArray(parsed.styles) && parsed.styles.length > 0) {
+              styles = parsed.styles;
+            }
+          }
+        } catch { /* ignore malformed textProperties */ }
+
+        const bodyHtml = (mentions?.length || styles?.length)
+          ? applyZaloMarkupHtml(truncate(body), mentions, styles)
           : escapeHtml(truncate(body));
         const tgText = formatGroupMsgHtml(senderName, bodyHtml);
         const sent = await tg.sendMessage(
@@ -805,12 +821,24 @@ ${escapeHtml(photoCaption)}`
         return;
       }
 
-      // ── 8. Link ────────────────────────────────────────────────────────────
+      // ── 8. Link (chat.recommended) ─────────────────────────────────────────
       if (msgType === ZALO_MSG_TYPES.LINK) {
-        const href  = media.href;
-        const title = media.title ?? href;
-        if (!href) return;
-        const linkText = `${groupCaption(senderName)}\n<a href="${href}">${title}</a>`;
+        // `href` is the canonical URL; fall back to `src` or the `msg` text field
+        // (both can carry the URL in some Zalo client versions).
+        const rawMedia = media as Record<string, unknown>;
+        const href = media.href
+          || (typeof rawMedia['src']  === 'string' ? rawMedia['src']  : '')
+          || (typeof rawMedia['msg']  === 'string' ? rawMedia['msg']  : '')
+          || '';
+        const title = media.title
+          || (typeof rawMedia['desc'] === 'string' ? rawMedia['desc'] : '')
+          || href;
+        if (!href) {
+          console.warn('[ZaloHandler] Link: no URL found in content:', JSON.stringify(rawMedia));
+          return;
+        }
+        const safeTitle = escapeHtml(title);
+        const linkText  = `${groupCaption(senderName)}\n<a href="${href}">${safeTitle}</a>`;
         const sent = await tg.sendMessage(config.telegram.groupId, linkText, {
           ...tgBase,
           parse_mode: 'HTML',
