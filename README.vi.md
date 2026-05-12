@@ -2,10 +2,6 @@
 
 *English version: [README.md](README.md)*
 
-## Video hướng dẫn cài đặt
-
-<video src="REC-20260510162634.mp4" controls width="100%"></video>
-
 ---
 
 Cầu nối tin nhắn hai chiều giữa **Zalo** và **Telegram**, triển khai bằng TypeScript trên Node.js. Mỗi cuộc trò chuyện Zalo (nhắn riêng hoặc nhóm) được ánh xạ tới một Forum Topic riêng biệt trong supergroup Telegram, cung cấp đồng bộ tin nhắn đầy đủ trên cả hai nền tảng.
