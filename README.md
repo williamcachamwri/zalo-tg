@@ -207,7 +207,15 @@ By default, the official Telegram Bot API restricts file downloads to **20 MB**.
    ```
 4. **Update `.env`**:
    ```env
+   # Enable local server mode (1 = use local server, 0 = use official API)
+   LOCAL_BOT_API=1
+
+   # URL of your local server
    TG_LOCAL_SERVER=http://localhost:8081
+
+   # Your Telegram App credentials (from https://my.telegram.org/apps)
+   TG_API_ID=your_api_id
+   TG_API_HASH=your_api_hash
    ```
 5. **Restart the bridge**:
    ```bash
@@ -215,12 +223,36 @@ By default, the official Telegram Bot API restricts file downloads to **20 MB**.
    npm start
    ```
 
+### `LOCAL_BOT_API` Flag — Detailed Explanation
+
+This flag is the **master switch** that controls whether the bridge uses the local server or the official Telegram API.
+
+| Value | Behavior |
+|---|---|
+| `LOCAL_BOT_API=1` | Use local server at `TG_LOCAL_SERVER`. File limit: **2 GB**. |
+| `LOCAL_BOT_API=0` | Use official `api.telegram.org`. File limit: **50 MB** download / **20 MB** upload. |
+
+**Why this matters:**
+
+- When `LOCAL_BOT_API=1`, the bot connects to your local server (`localhost:8081` by default). The local server handles all Telegram traffic including file uploads/downloads with the 2 GB limit.
+- When `LOCAL_BOT_API=0` (or the flag is missing), the bot uses the standard official Telegram API. `TG_LOCAL_SERVER` is **ignored** even if set.
+- **Switching modes requires a bot logout/login cycle.** If you previously used the local server and switch back to `LOCAL_BOT_API=0`, you must first log the bot back into the official API:
+  ```bash
+  # While local server is still running, log back into official API:
+  curl "http://localhost:8081/bot<YOUR_BOT_TOKEN>/logOut"
+  # Then stop the local server and set LOCAL_BOT_API=0
+  ```
+- **File ID compatibility:** `file_id` values are different between the local server and the official API. Files sent when using one mode cannot be downloaded when the bot is switched to the other mode. The bridge handles this gracefully by automatically falling back to the official API to resolve old `file_id`s when running in local mode.
+- **VPS deployment:** If your VPS does not have the local Bot API server installed, simply set `LOCAL_BOT_API=0`. No other changes needed — `TG_LOCAL_SERVER` and `TG_API_ID`/`TG_API_HASH` are ignored.
+- **Upload timeout** is dynamically calculated based on file size (minimum 30s, ~1 MB/s minimum throughput, capped at 10 minutes) to handle large files reliably.
+
 ### Features
 
 ✅ Files up to **2 GB** (vs. 20 MB limit with official API)  
 ✅ Direct file copy from local server (no download overhead)  
-✅ Automatic detection — uses local server if `TG_LOCAL_SERVER` is set  
-✅ Fallback to official API if server is unavailable  
+✅ Toggle with `LOCAL_BOT_API=1/0` — no code changes needed  
+✅ Graceful fallback: old file_ids from official API are resolved automatically  
+✅ Auto file cleanup — files deleted from local server after successful delivery  
 
 ### Full Setup Guide
 
