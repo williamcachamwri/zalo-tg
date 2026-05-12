@@ -6,7 +6,7 @@ import type { ZaloAPI } from '../zalo/types.js';
 import { store, msgStore, userCache, friendsCache, groupsCache, sentMsgStore, pollStore, mediaGroupStore, reactionEchoStore, aliasCache } from '../store.js';
 import { tgBot } from './bot.js';
 import { config } from '../config.js';
-import { downloadToTemp, cleanTemp, convertToM4a, extractVideoThumbnail } from '../utils/media.js';
+import { downloadToTemp, cleanTemp, convertToM4a, extractVideoThumbnail, convertWebmToGif } from '../utils/media.js';
 import { triggerQRLogin } from '../zalo/client.js';
 import { escapeHtml } from '../utils/format.js';
 
@@ -1357,18 +1357,41 @@ export function setupTelegramHandler(
         try {
           fileLink = await ctx.telegram.getFileLink(fileId);
         } catch (err: unknown) {
-          const isTooBig = err instanceof Error && err.message.includes('file is too big');
-          if (isTooBig) { await notifyTooBig(filename, fileSize); return; }
-          throw err;
+          const msg2 = err instanceof Error ? err.message : String(err);
+          if (msg2.includes('file is too big')) { await notifyTooBig(filename, fileSize); return; }
+          // Local server cannot resolve file_ids created by the official API (e.g. old messages).
+          // Fallback: query official Telegram API directly to get a download URL.
+          if (config.telegram.localServer && (msg2.includes('wrong file_id') || msg2.includes('temporarily unavailable'))) {
+            console.warn(`[TG→Zalo] Local server can't resolve file_id, falling back to official API: ${filename}`);
+            try {
+              const token = config.telegram.token;
+              const res = await (await import('axios')).default.get(
+                `https://api.telegram.org/bot${token}/getFile`,
+                { params: { file_id: fileId }, timeout: 10_000 },
+              );
+              const filePath: string | undefined = res.data?.result?.file_path;
+              if (!filePath) throw new Error('No file_path from official API');
+              fileLink = new URL(`https://api.telegram.org/file/bot${token}/${filePath}`);
+            } catch (fallbackErr) {
+              console.error('[TG→Zalo] Official API fallback failed:', fallbackErr);
+              await ctx.reply(`⚠️ Không thể tải file "${filename}". Hãy gửi lại file.`, { message_thread_id: topicId }).catch(() => {});
+              return;
+            }
+          } else {
+            throw err;
+          }
         }
         const localPath = await downloadToTemp(fileLink.toString(), filename);
         sentMsgStore.markSending(zaloId);
         try {
           console.log(`[TG→Zalo] Sending ${filename} → zaloId=${zaloId} type=${threadType}`);
+          // Allow ~1 MB/s minimum upload speed + 30s base; cap at 10 minutes
+          const fileSizeBytes = fileSize ?? 0;
+          const sendTimeoutMs = Math.min(Math.max(30_000, fileSizeBytes / 1024), 10 * 60_000);
           const withTimeout = <T>(p: Promise<T>) => Promise.race([
             p,
             new Promise<never>((_, reject) =>
-              setTimeout(() => reject(new Error('Send timeout (30s)')), 30_000),
+              setTimeout(() => reject(new Error(`Send timeout (${Math.round(sendTimeoutMs / 1000)}s)`)), sendTimeoutMs),
             ),
           ]);
 
@@ -1653,12 +1676,37 @@ export function setupTelegramHandler(
 
       if ('sticker' in msg && msg.sticker) {
         const sticker = msg.sticker;
-        // For animated (tgs) or video (webm) stickers, use the jpg thumbnail
-        // so Zalo receives a viewable image instead of a binary animation blob.
-        const useThumb = (sticker.is_animated || sticker.is_video) && sticker.thumbnail;
-        const fileId   = useThumb ? sticker.thumbnail!.file_id : sticker.file_id;
-        const ext      = useThumb ? '.jpg' : '.webp';
-        await sendAttachment(fileId, `sticker_${Date.now()}${ext}`);
+        if (sticker.is_video) {
+          // Video sticker (.webm) → convert to GIF so Zalo shows an animation
+          let webmPath: string | null = null;
+          let gifPath:  string | null = null;
+          try {
+            const fileLink = await ctx.telegram.getFileLink(sticker.file_id);
+            webmPath = await downloadToTemp(fileLink.toString(), `sticker_${Date.now()}.webm`);
+            gifPath  = await convertWebmToGif(webmPath);
+            sentMsgStore.markSending(zaloId);
+            try {
+              await api.sendMessage({ msg: '', attachments: [gifPath] }, zaloId, threadType);
+            } finally {
+              sentMsgStore.unmarkSending(zaloId);
+            }
+          } catch (err) {
+            console.error('[TG→Zalo] sticker webm→gif failed, falling back to thumbnail:', err);
+            // Fallback: send jpg thumbnail
+            const thumbId = sticker.thumbnail?.file_id;
+            if (thumbId) await sendAttachment(thumbId, `sticker_${Date.now()}.jpg`);
+          } finally {
+            if (webmPath) await cleanTemp(webmPath);
+            if (gifPath)  await cleanTemp(gifPath);
+          }
+        } else {
+          // Animated sticker (.tgs/Lottie) → no lightweight converter, use jpg thumbnail
+          // Static sticker (.webp) → send as-is
+          const useThumb = sticker.is_animated && sticker.thumbnail;
+          const fileId   = useThumb ? sticker.thumbnail!.file_id : sticker.file_id;
+          const ext      = useThumb ? '.jpg' : '.webp';
+          await sendAttachment(fileId, `sticker_${Date.now()}${ext}`);
+        }
         return;
       }
 

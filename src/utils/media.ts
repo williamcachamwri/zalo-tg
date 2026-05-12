@@ -24,6 +24,8 @@ export async function downloadToTemp(url: string, fileName?: string, retries = 3
       .slice(0, 128);
     const destPath = path.join(TMP_DIR, `${Date.now()}_${Math.random().toString(36).slice(2, 7)}_${baseName}`);
     copyFileSync(srcPath, destPath);
+    // Delete the original from local server's data dir — it's been delivered, no longer needed
+    await unlink(srcPath).catch(() => undefined);
     return destPath;
   }
 
@@ -94,6 +96,37 @@ export async function convertToM4a(inputPath: string): Promise<string> {
     ff.on('close', code => code === 0 ? resolve() : reject(new Error(`ffmpeg exit ${code}`)));
     ff.on('error', reject);
   });
+  return outputPath;
+}
+
+/**
+ * Convert a WebM video (e.g. Telegram video sticker) to GIF using ffmpeg.
+ * Returns the path to the output GIF (caller must clean it up).
+ */
+export async function convertWebmToGif(inputPath: string): Promise<string> {
+  mkdirSync(TMP_DIR, { recursive: true });
+  const outputPath = path.join(TMP_DIR, `sticker_${Date.now()}.gif`);
+  // Two-pass palette for better quality; scale to max 256px wide
+  const palettePass = path.join(TMP_DIR, `palette_${Date.now()}.png`);
+  await new Promise<void>((resolve, reject) => {
+    const ff = spawn('ffmpeg', [
+      '-y', '-i', inputPath,
+      '-vf', 'fps=15,scale=min(256\\,iw):-2:flags=lanczos,palettegen=stats_mode=diff',
+      palettePass,
+    ]);
+    ff.on('close', code => code === 0 ? resolve() : reject(new Error(`ffmpeg palettegen exit ${code}`)));
+    ff.on('error', reject);
+  });
+  await new Promise<void>((resolve, reject) => {
+    const ff = spawn('ffmpeg', [
+      '-y', '-i', inputPath, '-i', palettePass,
+      '-lavfi', 'fps=15,scale=min(256\\,iw):-2:flags=lanczos[x];[x][1:v]paletteuse=dither=bayer:bayer_scale=5',
+      outputPath,
+    ]);
+    ff.on('close', code => code === 0 ? resolve() : reject(new Error(`ffmpeg paletteuse exit ${code}`)));
+    ff.on('error', reject);
+  });
+  await unlink(palettePass).catch(() => undefined);
   return outputPath;
 }
 
