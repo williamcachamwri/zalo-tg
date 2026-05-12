@@ -15,8 +15,10 @@ A bidirectional message bridge between **Zalo** and **Telegram**, implemented in
 - [Installation](#installation)
 - [Configuration](#configuration)
 - [Running](#running)
+- [Large File Transfer](#large-file-transfer--20-mb)
 - [Bot Commands](#bot-commands)
 - [Project Structure](#project-structure)
+- [Data Files](#data-files)
 - [Security Considerations](#security-considerations)
 - [License](#license)
 
@@ -180,6 +182,54 @@ npm start
 ```
 
 On first run with no existing `credentials.json`, send `/login` inside any topic (or the General topic) of the bridged Telegram group. The bot will send a Zalo QR code image; scan it with the Zalo mobile app under **Settings → QR Code Login**.
+
+---
+
+## Large File Transfer (> 20 MB)
+
+By default, the official Telegram Bot API restricts file downloads to **20 MB**. To transfer larger files (up to **2 GB**), you can optionally run a **local Telegram Bot API server** on your machine.
+
+### Quick Start
+
+1. **Build or download the server** (see [Local Bot API Setup Guide](LOCAL_BOT_API_SETUP.md))
+2. **One-time logout** from official API:
+   ```bash
+   curl "https://api.telegram.org/bot<YOUR_BOT_TOKEN>/logOut"
+   ```
+3. **Start the local server**:
+   ```bash
+   telegram-bot-api \
+     --api-id=<YOUR_API_ID> \
+     --api-hash=<YOUR_API_HASH> \
+     --local \
+     --dir=~/zalo-tg-bot-api/data \
+     --http-port=8081
+   ```
+4. **Update `.env`**:
+   ```env
+   TG_LOCAL_SERVER=http://localhost:8081
+   ```
+5. **Restart the bridge**:
+   ```bash
+   npm run build
+   npm start
+   ```
+
+### Features
+
+✅ Files up to **2 GB** (vs. 20 MB limit with official API)  
+✅ Direct file copy from local server (no download overhead)  
+✅ Automatic detection — uses local server if `TG_LOCAL_SERVER` is set  
+✅ Fallback to official API if server is unavailable  
+
+### Full Setup Guide
+
+For detailed installation on **macOS, Linux, Windows**, see [**Local Bot API Setup Guide**](LOCAL_BOT_API_SETUP.md):
+- Prerequisites and dependencies
+- Build from source instructions
+- Systemd service setup (Linux)
+- Windows Task Scheduler setup
+- Troubleshooting and debugging
 
 ---
 

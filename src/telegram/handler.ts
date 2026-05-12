@@ -1324,12 +1324,16 @@ export function setupTelegramHandler(
       }
 
       // helper: download TG file → send via uploadAttachment → cleanup
-      const TG_FILE_LIMIT = 20 * 1024 * 1024; // 20 MB — Telegram Bot API hard limit
+      // Local server with --local flag supports up to 2 GB; official API caps at 20 MB
+      const TG_FILE_LIMIT = config.telegram.localServer
+        ? 2 * 1024 * 1024 * 1024  // 2 GB
+        : 20 * 1024 * 1024;        // 20 MB
+      const TG_FILE_LIMIT_LABEL = config.telegram.localServer ? '2 GB' : '20 MB';
       const notifyTooBig = async (filename: string, sizeBytes?: number) => {
         const sizeMb = sizeBytes ? ` (${(sizeBytes / 1024 / 1024).toFixed(1)} MB)` : '';
         await notifyError(
           `sendAttachment(${filename})`,
-          new Error(`File${sizeMb} vượt giới hạn 20 MB của Telegram Bot API — không thể tải xuống`),
+          new Error(`File${sizeMb} vượt giới hạn ${TG_FILE_LIMIT_LABEL} của Telegram Bot API — không thể tải xuống`),
         );
       };
 
@@ -1340,7 +1344,6 @@ export function setupTelegramHandler(
         caption?: string,
         captionMentions?: Array<{ pos: number; uid: string; len: number }>,
       ) => {
-        // Telegram Bot API cannot download files > 20 MB
         if (fileSize !== undefined && fileSize > TG_FILE_LIMIT) {
           await notifyTooBig(filename, fileSize);
           return;

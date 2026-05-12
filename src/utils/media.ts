@@ -1,15 +1,31 @@
 import axios from 'axios';
-import { createWriteStream, mkdirSync } from 'fs';
+import { createWriteStream, mkdirSync, copyFileSync } from 'fs';
 import { stat, unlink } from 'fs/promises';
 import { spawn } from 'child_process';
+import { fileURLToPath } from 'url';
 import path from 'path';
 import os from 'os';
 
 const TMP_DIR = path.join(os.tmpdir(), 'zalo-tg');
 
-/** Download a remote URL to a temp file. Returns the local file path. */
+/** Download a remote URL to a temp file. Returns the local file path.
+ *  When using a local Telegram Bot API server (--local flag), getFileLink()
+ *  returns a file:// URL pointing to the server's working directory.
+ *  In that case we copy the file directly instead of downloading via HTTP.
+ */
 export async function downloadToTemp(url: string, fileName?: string, retries = 3): Promise<string> {
   mkdirSync(TMP_DIR, { recursive: true });
+
+  // Local Bot API server returns file:// paths — copy directly, no HTTP needed
+  if (url.startsWith('file:')) {
+    const srcPath = fileURLToPath(url);
+    const baseName = (fileName ?? path.basename(srcPath))
+      .replace(/[^a-zA-Z0-9._-]/g, '_')
+      .slice(0, 128);
+    const destPath = path.join(TMP_DIR, `${Date.now()}_${Math.random().toString(36).slice(2, 7)}_${baseName}`);
+    copyFileSync(srcPath, destPath);
+    return destPath;
+  }
 
   // Sanitize filename and add a unique prefix so concurrent downloads
   // with the same logical name (e.g. multiple 'photo.jpg' in a media group)
