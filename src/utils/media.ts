@@ -2,9 +2,15 @@ import axios from 'axios';
 import { createWriteStream, mkdirSync, copyFileSync } from 'fs';
 import { stat, unlink } from 'fs/promises';
 import { spawn } from 'child_process';
-import { fileURLToPath } from 'url';
+import { fileURLToPath, pathToFileURL } from 'url';
 import path from 'path';
 import os from 'os';
+
+// Resolve scripts/ dir relative to this source file (works with tsx and after tsc build)
+const SCRIPTS_DIR = path.resolve(
+  new URL(import.meta.url).pathname,
+  '../../scripts',
+);
 
 const TMP_DIR = path.join(os.tmpdir(), 'zalo-tg');
 
@@ -127,6 +133,42 @@ export async function convertWebmToGif(inputPath: string): Promise<string> {
     ff.on('error', reject);
   });
   await unlink(palettePass).catch(() => undefined);
+  return outputPath;
+}
+
+/**
+ * Convert a Telegram animated sticker (.tgs / Lottie+gzip) to GIF.
+ * Requires: Python 3 + lottie + cairosvg packages in PYTHON_PATH env var
+ * (defaults to "python3"). On macOS homebrew, DYLD_LIBRARY_PATH must point
+ * to /opt/homebrew/lib so cairocffi can find libcairo.2.dylib.
+ * Returns the path to the output GIF (caller must clean it up).
+ */
+export async function convertTgsToGif(inputPath: string): Promise<string> {
+  mkdirSync(TMP_DIR, { recursive: true });
+  const outputPath = path.join(TMP_DIR, `sticker_tgs_${Date.now()}.gif`);
+  const scriptPath = path.join(SCRIPTS_DIR, 'tgs_to_gif.py');
+  const pythonBin  = process.env.PYTHON_PATH ?? 'python3';
+
+  await new Promise<void>((resolve, reject) => {
+    const proc = spawn(pythonBin, [scriptPath, inputPath, outputPath], {
+      env: {
+        ...process.env,
+        // macOS: help cairocffi find libcairo installed via Homebrew
+        DYLD_LIBRARY_PATH: [
+          '/opt/homebrew/lib',
+          process.env.DYLD_LIBRARY_PATH ?? '',
+        ].filter(Boolean).join(':'),
+      },
+    });
+    const stderr: string[] = [];
+    proc.stderr.on('data', (d: Buffer) => stderr.push(d.toString()));
+    proc.on('close', code => {
+      if (code === 0) resolve();
+      else reject(new Error(`tgs_to_gif.py exit ${code}: ${stderr.join('')}`));
+    });
+    proc.on('error', reject);
+  });
+
   return outputPath;
 }
 

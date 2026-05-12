@@ -6,7 +6,7 @@ import type { ZaloAPI } from '../zalo/types.js';
 import { store, msgStore, userCache, friendsCache, groupsCache, sentMsgStore, pollStore, mediaGroupStore, reactionEchoStore, aliasCache } from '../store.js';
 import { tgBot } from './bot.js';
 import { config } from '../config.js';
-import { downloadToTemp, cleanTemp, convertToM4a, extractVideoThumbnail, convertWebmToGif } from '../utils/media.js';
+import { downloadToTemp, cleanTemp, convertToM4a, extractVideoThumbnail, convertWebmToGif, convertTgsToGif } from '../utils/media.js';
 import { triggerQRLogin } from '../zalo/client.js';
 import { escapeHtml } from '../utils/format.js';
 
@@ -1699,13 +1699,31 @@ export function setupTelegramHandler(
             if (webmPath) await cleanTemp(webmPath);
             if (gifPath)  await cleanTemp(gifPath);
           }
+        } else if (sticker.is_animated) {
+          // Animated sticker (.tgs / Lottie+gzip) → convert to GIF via Python lottie
+          let tgsPath: string | null = null;
+          let gifPath: string | null = null;
+          try {
+            const fileLink = await ctx.telegram.getFileLink(sticker.file_id);
+            tgsPath = await downloadToTemp(fileLink.toString(), `sticker_${Date.now()}.tgs`);
+            gifPath = await convertTgsToGif(tgsPath);
+            sentMsgStore.markSending(zaloId);
+            try {
+              await api.sendMessage({ msg: '', attachments: [gifPath] }, zaloId, threadType);
+            } finally {
+              sentMsgStore.unmarkSending(zaloId);
+            }
+          } catch (err) {
+            console.error('[TG→Zalo] sticker tgs→gif failed, falling back to thumbnail:', err);
+            const thumbId = sticker.thumbnail?.file_id;
+            if (thumbId) await sendAttachment(thumbId, `sticker_${Date.now()}.jpg`);
+          } finally {
+            if (tgsPath) await cleanTemp(tgsPath);
+            if (gifPath)  await cleanTemp(gifPath);
+          }
         } else {
-          // Animated sticker (.tgs/Lottie) → no lightweight converter, use jpg thumbnail
           // Static sticker (.webp) → send as-is
-          const useThumb = sticker.is_animated && sticker.thumbnail;
-          const fileId   = useThumb ? sticker.thumbnail!.file_id : sticker.file_id;
-          const ext      = useThumb ? '.jpg' : '.webp';
-          await sendAttachment(fileId, `sticker_${Date.now()}${ext}`);
+          await sendAttachment(sticker.file_id, `sticker_${Date.now()}.webp`);
         }
         return;
       }
