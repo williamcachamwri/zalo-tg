@@ -231,6 +231,8 @@ For detailed installation on **macOS, Linux, Windows**, see [**Local Bot API Set
 - Windows Task Scheduler setup
 - Troubleshooting and debugging
 
+*Vietnamese version: [Hướng dẫn thiết lập Local Bot API](LOCAL_BOT_API_SETUP.vi.md)*
+
 ---
 
 ## Bot Commands

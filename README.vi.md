@@ -16,6 +16,7 @@ Cầu nối tin nhắn hai chiều giữa **Zalo** và **Telegram**, triển kha
 - [Cài đặt](#cài-đặt)
 - [Cấu hình](#cấu-hình)
 - [Chạy ứng dụng](#chạy-ứng-dụng)
+- [Chuyển tệp lớn](#chuyển-tệp-lớn--20-mb)
 - [Lệnh Bot](#lệnh-bot)
 - [Cấu trúc dự án](#cấu-trúc-dự-án)
 - [Bảo mật](#bảo-mật)
@@ -180,6 +181,54 @@ npm start
 ```
 
 Lần đầu chưa có `credentials.json`, gửi `/login` trong bất kỳ topic nào của group Telegram đã bridge. Bot sẽ gửi ảnh QR Zalo; quét bằng app Zalo tại **Cài đặt → Đăng nhập bằng QR**.
+
+---
+
+## Chuyển tệp lớn (> 20 MB)
+
+Mặc định, Telegram Bot API chính thức giới hạn tệp tải xuống ở **20 MB**. Để chuyển các tệp lớn hơn (lên đến **2 GB**), bạn có thể tùy chọn chạy một **máy chủ Telegram Bot API cục bộ** trên máy.
+
+### Bắt đầu nhanh
+
+1. **Xây dựng hoặc tải xuống máy chủ** (xem [Hướng dẫn thiết lập Local Bot API](LOCAL_BOT_API_SETUP.vi.md))
+2. **Đăng xuất một lần** khỏi API chính thức:
+   ```bash
+   curl "https://api.telegram.org/bot<YOUR_BOT_TOKEN>/logOut"
+   ```
+3. **Khởi động máy chủ cục bộ**:
+   ```bash
+   telegram-bot-api \
+     --api-id=<YOUR_API_ID> \
+     --api-hash=<YOUR_API_HASH> \
+     --local \
+     --dir=~/zalo-tg-bot-api/data \
+     --http-port=8081
+   ```
+4. **Cập nhật `.env`**:
+   ```env
+   TG_LOCAL_SERVER=http://localhost:8081
+   ```
+5. **Khởi động lại bridge**:
+   ```bash
+   npm run build
+   npm start
+   ```
+
+### Tính năng
+
+✅ Tệp lên đến **2 GB** (so với giới hạn 20 MB của API chính thức)  
+✅ Sao chép tệp trực tiếp từ máy chủ cục bộ (không overhead tải xuống)  
+✅ Tự động phát hiện — sử dụng máy chủ cục bộ nếu `TG_LOCAL_SERVER` được đặt  
+✅ Fallback về API chính thức nếu máy chủ không khả dụng  
+
+### Hướng dẫn thiết lập đầy đủ
+
+Để cài đặt chi tiết trên **macOS, Linux, Windows**, xem [**Hướng dẫn thiết lập Local Bot API**](LOCAL_BOT_API_SETUP.vi.md):
+- Yêu cầu tiên quyết và phụ thuộc
+- Hướng dẫn xây dựng từ nguồn
+- Thiết lập dịch vụ Systemd (Linux)
+- Thiết lập Windows Task Scheduler
+- Khắc phục sự cố và gỡ lỗi
 
 ---
 
