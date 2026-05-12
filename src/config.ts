@@ -26,8 +26,11 @@ function envFlag(key: string, defaultValue = false): boolean {
 
 export const config = {
   telegram: {
-    token:   requireEnv('TG_TOKEN'),
-    groupId: Number(requireEnv('TG_GROUP_ID')),
+    token:       requireEnv('TG_TOKEN'),
+    groupId:     Number(requireEnv('TG_GROUP_ID')),
+    /** URL của local Bot API server, ví dụ: http://localhost:8081.
+     *  Nếu không set → dùng official api.telegram.org. */
+    localServer: process.env.TG_LOCAL_SERVER?.replace(/\/$/, '') || null,
   },
   zalo: {
     credentialsPath: resolvePath(process.env.ZALO_CREDENTIALS_PATH, 'credentials.json'),

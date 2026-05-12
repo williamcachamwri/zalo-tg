@@ -1,9 +1,11 @@
 import { Telegraf } from 'telegraf';
 import https from 'https';
+import http from 'http';
 import { config } from '../config.js';
 
 // Force IPv4 to avoid ETIMEDOUT on systems where IPv6 is blocked/unreachable
 const agent = new https.Agent({ family: 4 });
+const localAgent = new http.Agent({ family: 4 });
 
 const BOT_COMMANDS = [
   { command: 'login',          description: 'Đăng nhập Zalo bằng QR' },
@@ -20,7 +22,9 @@ const BOT_COMMANDS = [
 
 /** Singleton Telegraf bot instance shared across the app. */
 export const tgBot = new Telegraf(config.telegram.token, {
-  telegram: { agent },
+  telegram: config.telegram.localServer
+    ? { apiRoot: config.telegram.localServer, agent: localAgent }
+    : { agent },
 });
 
 export async function syncTelegramCommands(): Promise<void> {
