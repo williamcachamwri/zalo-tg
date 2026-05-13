@@ -27,7 +27,7 @@ services:
       - telegram-bot-api-data:/data
       - /tmp:/tmp
     ports:
-      - "8081:8081"
+      - "${TG_LOCAL_PORT:-8081}:8081"
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://localhost:8081/"]

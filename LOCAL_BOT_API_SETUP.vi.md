@@ -263,6 +263,7 @@ curl.exe http://localhost:8081
 Thêm hoặc sửa đổi:
 
 ```env
+LOCAL_BOT_API=1
 TG_API_ID=<YOUR_API_ID>
 TG_API_HASH=<YOUR_API_HASH>
 TG_LOCAL_SERVER=http://localhost:8081
@@ -310,10 +311,48 @@ Tệp nhị phân không có trong `PATH` của bạn. Hãy:
 
 **Danh sách kiểm tra**:
 1. ✅ Bạn đã chạy `/logOut` trên API chính thức? (lệnh curl ở trên)
-2. ✅ `TG_LOCAL_SERVER=http://localhost:8081` có được đặt trong `.env`?
-3. ✅ Máy chủ cục bộ có đang chạy? (`curl http://localhost:8081`)
-4. ✅ Bạn đã xây dựng lại? (`npm run build`)
-5. ✅ Bạn đã khởi động lại bot? (kết thúc và chạy lại)
+2. ✅ `LOCAL_BOT_API=1` có được đặt trong `.env`?
+3. ✅ `TG_LOCAL_SERVER=http://localhost:8081` (hoặc host/IP:port của bạn) có được đặt trong `.env`?
+4. ✅ Máy chủ cục bộ có đang chạy? (`curl http://localhost:8081`)
+5. ✅ Bạn đã xây dựng lại? (`npm run build`)
+6. ✅ Bạn đã khởi động lại bot? (kết thúc và chạy lại)
+
+### Điều tra lỗi `"Not Found"` với Docker (ví dụ: `http://192.168.50.118:8082`)
+
+Phản hồi `{"ok":false,"error_code":404,"description":"Not Found"}` ở đường dẫn gốc của server là bình thường.
+Hãy dùng checklist sau để xác minh Docker và network:
+
+1. **Xác nhận container đang chạy và map port đúng**
+   ```bash
+   docker compose ps
+   docker ps --filter name=telegram-bot-api --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
+   ```
+   Kỳ vọng: port host (ví dụ `8082`) map vào `8081` trong container (`0.0.0.0:8082->8081/tcp`).
+
+2. **Kiểm tra biến môi trường bridge đang dùng**
+   ```bash
+   grep -E '^(LOCAL_BOT_API|TG_LOCAL_SERVER)=' .env
+   ```
+   Bắt buộc:
+   - `LOCAL_BOT_API=1`
+   - `TG_LOCAL_SERVER=http://192.168.50.118:8082` (khớp chính xác host/IP/port đã map)
+
+3. **Kiểm tra endpoint API thay vì đường dẫn gốc**
+   ```bash
+   # Đường dẫn gốc: 404 Not Found là bình thường
+   curl http://192.168.50.118:8082
+
+   # Method của Bot API phải chạy được
+   curl "http://192.168.50.118:8082/bot<YOUR_BOT_TOKEN>/getMe"
+   ```
+   Nếu `/getMe` cũng trả về `Not Found`, request chưa đi đúng vào telegram-bot-api.
+
+4. **Đọc log container để tìm lỗi network/API**
+   ```bash
+   docker logs --tail=200 telegram-bot-api
+   docker logs -f telegram-bot-api
+   ```
+   Tìm các lỗi bind port, connection, request không hợp lệ, hoặc sai token/path method.
 
 ### "protocol mismatch: file: expected http:"
 

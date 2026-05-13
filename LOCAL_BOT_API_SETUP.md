@@ -263,6 +263,7 @@ curl.exe http://localhost:8081
 Add or modify:
 
 ```env
+LOCAL_BOT_API=1
 TG_API_ID=<YOUR_API_ID>
 TG_API_HASH=<YOUR_API_HASH>
 TG_LOCAL_SERVER=http://localhost:8081
@@ -310,10 +311,48 @@ The binary is not in your `PATH`. Either:
 
 **Checklist**:
 1. ✅ Did you run `/logOut` on official API? (curl command above)
-2. ✅ Is `TG_LOCAL_SERVER=http://localhost:8081` set in `.env`?
-3. ✅ Is the local server running? (`curl http://localhost:8081`)
-4. ✅ Did you rebuild? (`npm run build`)
-5. ✅ Did you restart the bot? (kill and re-run)
+2. ✅ Is `LOCAL_BOT_API=1` set in `.env`?
+3. ✅ Is `TG_LOCAL_SERVER=http://localhost:8081` (or your host/IP:port) set in `.env`?
+4. ✅ Is the local server running? (`curl http://localhost:8081`)
+5. ✅ Did you rebuild? (`npm run build`)
+6. ✅ Did you restart the bot? (kill and re-run)
+
+### Investigate `"Not Found"` with Docker (example: `http://192.168.50.118:8082`)
+
+`{"ok":false,"error_code":404,"description":"Not Found"}` on the server root path is expected.
+Use this checklist to verify Docker and networking:
+
+1. **Confirm container is running and port mapping is correct**
+   ```bash
+   docker compose ps
+   docker ps --filter name=telegram-bot-api --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
+   ```
+   Expected: host port (e.g. `8082`) maps to container `8081` (`0.0.0.0:8082->8081/tcp`).
+
+2. **Check environment variables used by the bridge**
+   ```bash
+   grep -E '^(LOCAL_BOT_API|TG_LOCAL_SERVER)=' .env
+   ```
+   Required:
+   - `LOCAL_BOT_API=1`
+   - `TG_LOCAL_SERVER=http://192.168.50.118:8082` (match your mapped host/IP/port exactly)
+
+3. **Verify API endpoint, not root path**
+   ```bash
+   # Root path: 404 Not Found is normal
+   curl http://192.168.50.118:8082
+
+   # Bot API method must work
+   curl "http://192.168.50.118:8082/bot<YOUR_BOT_TOKEN>/getMe"
+   ```
+   If `/getMe` also returns `Not Found`, the request is not reaching telegram-bot-api correctly.
+
+4. **Read container logs for network/API errors**
+   ```bash
+   docker logs --tail=200 telegram-bot-api
+   docker logs -f telegram-bot-api
+   ```
+   Look for bind errors, connection errors, invalid requests, or token/method path issues.
 
 ### "protocol mismatch: file: expected http:"
 
