@@ -561,10 +561,11 @@ export async function setupZaloHandler(api: ZaloAPI): Promise<void> {
         : null;
 
       // Resolve display name:
-      //   - Group: use group name from getGroupInfo
+      //   - Group: use group name from getGroupInfo for topic, but use the sender's
+      //     contact-book name in message captions/headers when available.
       //   - DM: use the PEER's contact-book name (zaloId = peer UID), not the raw sender dName.
       let displayName = senderName;
-      let bridgeSenderName = senderName;
+      let bridgeSenderName = aliasCache.get(msg.data.uidFrom) ?? senderName;
       let groupAvatarUrl: string | undefined;
       if (type === ThreadType.Group) {
         const info = await getCachedGroupInfo(api, zaloId);
