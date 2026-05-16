@@ -1480,6 +1480,20 @@ export function setupTelegramHandler(
       }
 
       const { zaloId } = entry;
+
+      const resolveZaloQuoteForTgReply = (replyToMsgId: number | undefined) => {
+        if (replyToMsgId === undefined) return undefined;
+        const fromZalo = msgStore.getQuote(replyToMsgId);
+        if (fromZalo) return fromZalo;
+        const sent = sentMsgStore.getQuote(replyToMsgId);
+        if (!sent || sent.zaloId !== zaloId || sent.threadType !== entry.type) return undefined;
+        const replyToMessage = 'reply_to_message' in msg ? msg.reply_to_message : undefined;
+        const replyText = (replyToMessage && 'text' in replyToMessage)
+          ? (replyToMessage.text ?? '')
+          : ((replyToMessage && 'caption' in replyToMessage) ? (replyToMessage.caption ?? '') : '');
+        return { ...sent, content: replyText };
+      };
+
       // Ensure numeric value is correctly mapped to ThreadType enum at runtime
       const threadType: ThreadType = entry.type === 1 ? ThreadType.Group : ThreadType.User;
 
@@ -1514,7 +1528,7 @@ export function setupTelegramHandler(
         console.log(`[TG→Zalo] sendMessage → zaloId=${zaloId} type=${threadType} text="${msg.text.slice(0, 80)}"`);
         // Look up Zalo quote data if this TG message is a reply
         const replyToMsgId = msg.reply_to_message?.message_id;
-        const zaloQuote = replyToMsgId !== undefined ? msgStore.getQuote(replyToMsgId) : undefined;
+        const zaloQuote = resolveZaloQuoteForTgReply(replyToMsgId);
 
         const _rawTextMentions = resolveTgMentions(
           msg.text,
@@ -1562,7 +1576,7 @@ export function setupTelegramHandler(
           });
           const zaloMsgId = sendResult?.message?.msgId;
           if (zaloMsgId !== undefined) {
-            sentMsgStore.save(msg.message_id, { msgId: zaloMsgId, zaloId, threadType });
+            sentMsgStore.save(msg.message_id, { msgId: zaloMsgId, cliMsgId: zaloMsgId, zaloId, threadType });
           }
         } catch (err) {
           await notifyError('sendMessage', err);
@@ -1601,7 +1615,7 @@ export function setupTelegramHandler(
         const replyToMsgId = 'reply_to_message' in msg
           ? (msg as { reply_to_message?: { message_id: number } }).reply_to_message?.message_id
           : undefined;
-        const zaloQuote = replyToMsgId !== undefined ? msgStore.getQuote(replyToMsgId) : undefined;
+        const zaloQuote = resolveZaloQuoteForTgReply(replyToMsgId);
         let fileLink: URL;
         try {
           fileLink = await ctx.telegram.getFileLink(fileId);
@@ -1690,7 +1704,7 @@ export function setupTelegramHandler(
 
           const zaloMsgId = sendResult?.message?.msgId ?? sendResult?.attachment?.[0]?.msgId;
           if (zaloMsgId !== undefined) {
-            sentMsgStore.save(msg.message_id, { msgId: zaloMsgId, zaloId, threadType });
+            sentMsgStore.save(msg.message_id, { msgId: zaloMsgId, cliMsgId: zaloMsgId, zaloId, threadType });
           }
           console.log(`[TG→Zalo] Send OK: ${filename}`);
         } catch (err) {
@@ -1736,7 +1750,7 @@ export function setupTelegramHandler(
         meta: { topicId: number; zaloId: string; threadType: 0 | 1; replyToMsgId?: number },
       ) => {
         const replyMsgId = meta.replyToMsgId;
-        const zaloQuote = replyMsgId !== undefined ? msgStore.getQuote(replyMsgId) : undefined;
+        const zaloQuote = resolveZaloQuoteForTgReply(replyMsgId);
         const caption = items[0]?.caption ?? '';
         const capMentions = items[0]?.captionMentions;
         const localPaths: string[] = [];
@@ -1882,7 +1896,7 @@ export function setupTelegramHandler(
               threadType,
             );
             if (result?.msgId !== undefined) {
-              sentMsgStore.save(msg.message_id, { msgId: result.msgId, zaloId, threadType });
+              sentMsgStore.save(msg.message_id, { msgId: result.msgId, cliMsgId: result.msgId, zaloId, threadType });
             }
           } finally {
             sentMsgStore.unmarkSending(zaloId);
@@ -1950,7 +1964,7 @@ export function setupTelegramHandler(
               ) as { message?: { msgId?: number } | null; attachment?: Array<{ msgId?: number }> };
               const zaloMsgId = sendResult?.message?.msgId ?? sendResult?.attachment?.[0]?.msgId;
               if (zaloMsgId !== undefined) {
-                sentMsgStore.save(msg.message_id, { msgId: zaloMsgId, zaloId, threadType });
+                sentMsgStore.save(msg.message_id, { msgId: zaloMsgId, cliMsgId: zaloMsgId, zaloId, threadType });
               }
             } finally {
               sentMsgStore.unmarkSending(zaloId);

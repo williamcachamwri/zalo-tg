@@ -507,6 +507,21 @@ export async function setupZaloHandler(api: ZaloAPI): Promise<void> {
           selfMsgIds.some(id => sentMsgStore.getByZaloMsgId(id) !== undefined)
           || sentMsgStore.isSendingTo(msg.threadId);
         if (isEcho) {
+          const echoQuoteData: ZaloQuoteData = {
+            msgId:      msg.data.msgId,
+            cliMsgId:   msg.data.cliMsgId ?? '',
+            uidFrom:    msg.data.uidFrom,
+            ts:         msg.data.ts,
+            msgType:    msg.data.msgType ?? ZALO_MSG_TYPES.TEXT,
+            content:    typeof msg.data.content === 'string' ? msg.data.content : (msg.data.content as Record<string, unknown>),
+            ttl:        msg.data.ttl ?? 0,
+            zaloId:     msg.threadId,
+            threadType: msg.type as 0 | 1,
+          };
+          sentMsgStore.attachQuote(
+            [msg.data.msgId, msg.data.realMsgId, msg.data.cliMsgId].filter((id): id is string => typeof id === 'string' && id.length > 0),
+            echoQuoteData,
+          );
           console.log(`[Zalo→TG] Skip bot echo (${selfMsgIds.join(', ')})`);
           return;
         }

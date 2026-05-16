@@ -583,6 +583,8 @@ export const groupsCache = {
 export interface SentMsgInfo {
   /** Zalo msgId returned by api.sendMessage / api.sendVoice */
   msgId:      string | number;
+  /** Zalo cliMsgId/clientId for this TG→Zalo send, when available. */
+  cliMsgId?:  string | number;
   /** Zalo conversation ID */
   zaloId:     string;
   /** 0 = DM, 1 = Group */
@@ -600,10 +602,33 @@ export const sentMsgStore = {
   save(tgMsgId: number, info: SentMsgInfo): void {
     _sentMap.set(tgMsgId, info);
     _sentByZaloId.set(String(info.msgId), tgMsgId);
+    if (info.cliMsgId !== undefined && String(info.cliMsgId) !== '0') {
+      _sentByZaloId.set(String(info.cliMsgId), tgMsgId);
+    }
   },
 
   get(tgMsgId: number): SentMsgInfo | undefined {
     return _sentMap.get(tgMsgId);
+  },
+
+  /**
+   * Build fallback quote data for Telegram replies to TG-originated messages.
+   * This gets replaced by richer self-echo quote data when available.
+   */
+  getQuote(tgMsgId: number): ZaloQuoteData | undefined {
+    const info = _sentMap.get(tgMsgId);
+    if (!info) return undefined;
+    return {
+      msgId:      String(info.msgId),
+      cliMsgId:   info.cliMsgId !== undefined ? String(info.cliMsgId) : String(info.msgId),
+      uidFrom:    '0',
+      ts:         String(Date.now()),
+      msgType:    'webchat',
+      content:    '',
+      ttl:        0,
+      zaloId:     info.zaloId,
+      threadType: info.threadType,
+    };
   },
 
   /**
@@ -613,6 +638,14 @@ export const sentMsgStore = {
    */
   getByZaloMsgId(zaloMsgId: string): number | undefined {
     return _sentByZaloId.get(zaloMsgId);
+  },
+
+  /** Store richer quote data once the Zalo self-echo for a TG→Zalo send arrives. */
+  attachQuote(zaloMsgIds: string[], quote: ZaloQuoteData): void {
+    for (const id of zaloMsgIds) {
+      const tgMsgId = _sentByZaloId.get(String(id));
+      if (tgMsgId !== undefined) _tgToQuote.set(tgMsgId, quote);
+    }
   },
 
   /**
