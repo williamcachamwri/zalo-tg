@@ -1661,9 +1661,9 @@ export function setupTelegramHandler(
           // zca-js splits internally when msg is non-empty + quote is set:
           //   1) sends caption+quote as text (reply indicator in Zalo)
           //   2) sends attachment without quote
-          // When no caption, skip the quote — adding a placeholder text just to
-          // carry the quote would create visible noise in the conversation.
-          const effectiveCaption = caption ?? '';
+          // For captionless files, include a small filename label so Zalo can
+          // render the reply indicator instead of silently dropping the quote.
+          const effectiveCaption = caption ?? (zaloQuote ? `📎 ${filename}` : '');
 
           let attachmentSource: AttachmentSource[] = [localPath];
           if (!['jpg', 'jpeg', 'png', 'webp', 'gif', 'mp4'].includes(path.extname(filename).slice(1).toLowerCase())) {
@@ -2079,6 +2079,10 @@ export function setupTelegramHandler(
       }
 
       if ('location' in msg && msg.location) {
+        const replyToMsgId = 'reply_to_message' in msg
+          ? (msg as { reply_to_message?: { message_id: number } }).reply_to_message?.message_id
+          : undefined;
+        const zaloQuote = resolveZaloQuoteForTgReply(replyToMsgId);
         const { latitude, longitude } = msg.location;
         const venue = ('venue' in msg && msg.venue) ? (msg.venue as { title?: string; address?: string }) : undefined;
         const mapsUrl = `https://www.google.com/maps?q=${latitude},${longitude}`;
@@ -2087,7 +2091,15 @@ export function setupTelegramHandler(
           : `📍 ${mapsUrl}`;
         try {
           // zca-js has no sendLocation — send as plain text with coords
-          await api.sendMessage({ msg: locationLabel }, zaloId, threadType);
+          const sendResult = await api.sendMessage(
+            { msg: locationLabel, ...(zaloQuote ? { quote: zaloQuote } : {}) },
+            zaloId,
+            threadType,
+          );
+          const zaloMsgId = sendResult?.message?.msgId;
+          if (zaloMsgId !== undefined) {
+            sentMsgStore.save(msg.message_id, { msgId: zaloMsgId, cliMsgId: zaloMsgId, zaloId, threadType });
+          }
           console.log(`[TG→Zalo] Location sent: ${latitude},${longitude}`);
         } catch (err) {
           console.error('[TG→Zalo] Location send error:', err);
