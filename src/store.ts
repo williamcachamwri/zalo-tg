@@ -265,6 +265,8 @@ const _tgToQuote = new Map<number, ZaloQuoteData>();
 const _msgKeyOrder: string[] = [];
 /** Số lượng zaloMsgId trỏ đến mỗi tgMsgId (để tránh xoá quote sớm) */
 const _tgRefCount = new Map<number, number>();
+/** Rich quote payload captured from a Zalo self-echo before the send result is mapped. */
+const _pendingQuoteByZaloId = new Map<string, ZaloQuoteData>();
 
 function _evictOne(): void {
   const old = _msgKeyOrder.shift();
@@ -318,7 +320,22 @@ export const msgStore = {
       }
       _zaloToTg.set(id, tgMsgId);
     }
-    _tgToQuote.set(tgMsgId, quote);
+    const pendingQuote = validIds
+      .map(id => _pendingQuoteByZaloId.get(String(id)))
+      .find((q): q is ZaloQuoteData => q !== undefined);
+    if (pendingQuote) {
+      _tgToQuote.set(tgMsgId, pendingQuote);
+      for (const id of validIds) _pendingQuoteByZaloId.delete(String(id));
+    }
+
+    const existingQuote = _tgToQuote.get(tgMsgId);
+    const isPlaceholderQuote = (!quote.cliMsgId || quote.cliMsgId === '0') && quote.msgType === 'webchat';
+    const hasRicherExistingQuote = existingQuote !== undefined
+      && Boolean(existingQuote.cliMsgId && existingQuote.cliMsgId !== '0')
+      && (existingQuote.msgType !== 'webchat' || typeof existingQuote.content !== 'string');
+    if (!isPlaceholderQuote || !hasRicherExistingQuote) {
+      _tgToQuote.set(tgMsgId, quote);
+    }
     _scheduleMsgPersist();
   },
 
@@ -330,6 +347,32 @@ export const msgStore = {
   /** Get the Zalo quote data for a given Telegram message_id (for TG→Zalo replies). */
   getQuote(tgMsgId: number): ZaloQuoteData | undefined {
     return _tgToQuote.get(tgMsgId);
+  },
+
+  /**
+   * Store richer quote data for a Telegram-originated message after Zalo echoes it.
+   * The HTTP send result can differ from the echoed msgId/realMsgId/cliMsgId,
+   * so bind every known id to the same Telegram message.
+   */
+  attachQuote(zaloMsgIds: string[], quote: ZaloQuoteData): void {
+    const ids = zaloMsgIds.map(id => String(id)).filter(id => id && id !== '0');
+    const tgMsgId = ids
+      .map(id => _zaloToTg.get(id))
+      .find((id): id is number => id !== undefined);
+    if (tgMsgId === undefined) {
+      for (const id of ids) _pendingQuoteByZaloId.set(id, quote);
+      return;
+    }
+
+    for (const id of ids) {
+      if (!_zaloToTg.has(id)) {
+        _tgRefCount.set(tgMsgId, (_tgRefCount.get(tgMsgId) ?? 0) + 1);
+        _msgKeyOrder.push(id);
+      }
+      _zaloToTg.set(id, tgMsgId);
+    }
+    _tgToQuote.set(tgMsgId, quote);
+    _scheduleMsgPersist();
   },
 
   /**

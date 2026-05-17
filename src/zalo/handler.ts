@@ -500,16 +500,42 @@ export async function setupZaloHandler(api: ZaloAPI): Promise<void> {
       // Skip TG→Zalo echo (re-emitted by Zalo server) but forward
       // real self messages sent directly from the Zalo app.
       if (msg.isSelf) {
-        // Update cliMsgId from echo for future quote chains
-        if (msg.data.cliMsgId) {
-          const _tgId = msgStore.getTgMsgId(msg.data.msgId);
-          if (_tgId !== undefined) {
-            msgStore.updateQuoteCliMsgId(_tgId, msg.data.cliMsgId);
-          }
+        const selfIds = [
+          msg.data.msgId,
+          msg.data.realMsgId,
+          msg.data.cliMsgId,
+        ].filter((id): id is string => Boolean(id) && id !== '0');
+
+        // Update cliMsgId and rich quote data from the echo for future quote chains.
+        const _tgId = selfIds
+          .map(id => msgStore.getTgMsgId(id) ?? sentMsgStore.getByZaloMsgId(id))
+          .find((id): id is number => id !== undefined);
+        if (_tgId !== undefined && msg.data.cliMsgId) {
+          msgStore.updateQuoteCliMsgId(_tgId, msg.data.cliMsgId);
         }
+        const { text, media } = parseContent(msg.data.content);
+        if (_tgId !== undefined) {
+          sentMsgStore.save(_tgId, {
+            msgIds: selfIds,
+            zaloId: msg.threadId,
+            threadType: msg.type as 0 | 1,
+          });
+        }
+        msgStore.attachQuote(selfIds, {
+          msgId:    msg.data.realMsgId && msg.data.realMsgId !== '0' ? msg.data.realMsgId : msg.data.msgId,
+          cliMsgId: msg.data.cliMsgId ?? msg.data.msgId,
+          uidFrom:  msg.data.uidFrom ?? String(api.getOwnId?.() ?? ''),
+          ts:       msg.data.ts,
+          msgType:  msg.data.msgType ?? ZALO_MSG_TYPES.TEXT,
+          content:  text !== null ? (msg.data.content as string) : (media as Record<string, unknown>),
+          ttl:      msg.data.ttl ?? 0,
+          zaloId:   msg.threadId,
+          threadType: msg.type as 0 | 1,
+        });
+
         // If this msgId is already tracked in sentMsgStore OR we're in the
         // middle of sending to this Zalo thread → it's an echo, skip.
-        const isEcho = sentMsgStore.getByZaloMsgId(msg.data.msgId) !== undefined
+        const isEcho = selfIds.some(id => sentMsgStore.getByZaloMsgId(id) !== undefined)
           || sentMsgStore.isSendingTo(msg.threadId);
         if (isEcho) {
           console.log(`[Zalo→TG] Skip echo self message (${msg.data.msgId})`);

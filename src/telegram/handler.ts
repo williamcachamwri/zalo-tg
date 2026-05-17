@@ -1673,6 +1673,22 @@ export function setupTelegramHandler(
       console.log(`[TG→Zalo] getZaloQuote: found in msgStore for tgMsgId=${tgMsgId} msgId=${fromMsgStore.msgId} cliMsgId=${fromMsgStore.cliMsgId}`);
       return fromMsgStore;
     }
+    const fromSentStore = sentMsgStore.get(tgMsgId);
+    if (fromSentStore) {
+      const msgId = String(fromSentStore.msgIds[0] ?? '');
+      console.log(`[TG→Zalo] getZaloQuote: found fallback in sentMsgStore for tgMsgId=${tgMsgId} msgId=${msgId}`);
+      return {
+        msgId,
+        cliMsgId: msgId,
+        uidFrom: '0',
+        ts: String(Math.floor(Date.now() / 1000)),
+        msgType: 'webchat',
+        content: '',
+        ttl: 0,
+        zaloId: fromSentStore.zaloId,
+        threadType: fromSentStore.threadType,
+      };
+    }
     console.log(`[TG→Zalo] getZaloQuote: no quote found for tgMsgId=${tgMsgId}`);
     return undefined;
   }

@@ -4,6 +4,7 @@ WORKDIR /app
 
 # Install all dependencies (devDependencies needed for build)
 COPY package*.json ./
+COPY scripts ./scripts
 RUN npm ci
 
 # Build and then reinstall production-only dependencies
