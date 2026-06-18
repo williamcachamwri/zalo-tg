@@ -14,6 +14,7 @@ import { applyZaloMarkupHtml, formatGroupMsgHtml, formatGroupMsg, groupCaption, 
 import type { ZaloStyle } from '../utils/format.js';
 import { msgStore, userCache, pollStore, sentMsgStore, zaloAlbumStore, reactionEchoStore, reactionSummaryStore, reactionEventDedupeStore, aliasCache, friendsCache, recentlyRecalledMsgIds, type ZaloQuoteData } from '../store.js';
 import { tgQueue } from '../utils/tgQueue.js';
+import { maybeAutoReply } from './autoReply.js';
 
 // Proxy that routes every tg.* call through the rate-limit queue
 // so 429 errors are auto-retried instead of crashing the process.
@@ -445,17 +446,49 @@ const _memberCacheLoaded = new Set<string>();
  */
 const _inFlightMsgIds = new Set<string>();
 
+/** The active 'message' handler, captured so /history can replay messages
+ *  through the exact same pipeline AND await each one (guaranteeing order,
+ *  which `listener.emit` cannot since the handler is async and not awaited). */
+let _activeMessageHandler: ((msg: ZaloMessage) => Promise<void>) | null = null;
+
+/**
+ * Replay messages through the live message pipeline, one at a time, awaiting
+ * each so they render to Telegram in the given order. Returns the count
+ * processed. Used by the /history backfill command.
+ */
+export async function replayHistoryMessages(messages: ZaloMessage[], gapMs = 250): Promise<number> {
+  const handler = _activeMessageHandler;
+  if (!handler) return 0;
+  let processed = 0;
+  for (const msg of messages) {
+    try {
+      await handler(msg);
+      processed++;
+    } catch (err) {
+      console.warn('[replayHistory] handler error:', err);
+    }
+    if (gapMs > 0) await new Promise(r => setTimeout(r, gapMs));
+  }
+  return processed;
+}
+
 export async function setupZaloHandler(api: ZaloAPI): Promise<void> {
   // Pre-populate userCache for all existing group topics on startup.
   // Stagger calls by 2 s each to avoid triggering the rate limiter (code 221).
   const startupGroups = store.all().filter(e => e.type === 1 /* Group */);
-  for (const entry of startupGroups) {
-    _memberCacheLoaded.add(entry.zaloId);
-  }
   void (async () => {
     for (let i = 0; i < startupGroups.length; i++) {
-      if (i > 0) await new Promise(r => setTimeout(r, 0));
-      void populateGroupMemberCache(api, startupGroups[i].zaloId);
+      const gid = startupGroups[i].zaloId;
+      // A live message may have already warmed this group via the lazy path
+      // (handler below) during the stagger window — don't redo it, and don't
+      // mark groups "loaded" up-front or the lazy path is suppressed for groups
+      // whose cache hasn't actually populated yet.
+      if (_memberCacheLoaded.has(gid)) continue;
+      // Space the calls (a 0 ms gap made this a burst that could trip Zalo's
+      // rate limiter / code 221 on startup with many group topics).
+      if (i > 0) await new Promise(r => setTimeout(r, 2000));
+      _memberCacheLoaded.add(gid);
+      await populateGroupMemberCache(api, gid);
     }
   })();
 
@@ -495,7 +528,7 @@ export async function setupZaloHandler(api: ZaloAPI): Promise<void> {
     console.warn('[Zalo] Failed to load address-book names:', err);
   }
 
-  api.listener.on('message', async (msg: ZaloMessage) => {
+  const handleZaloMessage = async (msg: ZaloMessage): Promise<void> => {
     try {
       // Skip TG→Zalo echo (re-emitted by Zalo server) but forward
       // real self messages sent directly from the Zalo app.
@@ -565,6 +598,13 @@ export async function setupZaloHandler(api: ZaloAPI): Promise<void> {
       if (type === 1 && !_memberCacheLoaded.has(zaloId)) {
         _memberCacheLoaded.add(zaloId);
         void populateGroupMemberCache(api, zaloId);
+      }
+
+      // Auto-reply (offline mode): answer incoming text DMs when enabled.
+      // Fire-and-forget; only 1-1 threads are answered (see autoReply.ts).
+      // Gate on TEXT so we never auto-reply to stickers/media/system events.
+      if (!msg.isSelf && msgType === ZALO_MSG_TYPES.TEXT) {
+        void maybeAutoReply(api, zaloId, type);
       }
 
       // Parse content early so we can start media download in parallel with topic resolution
@@ -1472,7 +1512,9 @@ ${escapeHtml(photoCaption)}`
         console.error('[ZaloHandler] Error:', err);
       }
     }
-  });
+  };
+  _activeMessageHandler = handleZaloMessage;
+  api.listener.on('message', handleZaloMessage);
 
   // Catch-up stream from zca-js after reconnect.
   // Replays recent messages through the same main handler to refill bridges.

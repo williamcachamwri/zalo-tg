@@ -16,6 +16,8 @@ const BOT_COMMANDS = [
   { command: 'group_infoall',  description: 'Xem toàn bộ thành viên nhóm Zalo hiện tại' },
   { command: 'recall',         description: 'Thu hồi tin nhắn đã gửi sang Zalo' },
   { command: 'topic',          description: 'Quản lý topic: list | info | delete' },
+  { command: 'history',        description: 'Nạp lịch sử chat nhóm vào topic hiện tại' },
+  { command: 'autoreply',      description: 'Tự trả lời DM khi offline: on | off | status' },
   { command: 'addgroup',       description: 'Tạo nhóm Zalo mới từ topic hiện tại' },
   { command: 'addfriend',      description: 'Gửi lời mời kết bạn Zalo' },
   { command: 'friendrequests', description: 'Xem & duyệt lời mời kết bạn đang chờ' },
