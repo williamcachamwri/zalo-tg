@@ -48,6 +48,7 @@ import { downloadToTemp, cleanTemp, convertToM4a, extractVideoThumbnail, convert
 import { cancelActiveQRLogin, triggerQRLogin } from '../zalo/client.js';
 import { cancelActiveAppLogin, triggerAppLogin } from '../zalo/loginApp.js';
 import { invalidateAppSession, appGetReceivedFriendRequests, appGetSentFriendRequests, appGetGroupInfo, appGetGroupMembersInfo } from '../zalo/appApi.js';
+import { resetMemberCacheLoaded } from '../zalo/handler.js';
 import { escapeHtml } from '../utils/format.js';
 import { requestShutdown } from '../lifecycle.js';
 
@@ -423,6 +424,7 @@ export function setupTelegramHandler(
     const threadId = isFromGroup ? ctx.message.message_thread_id : undefined;
     void handleLoginCommand(ctx.chat.id, threadId, ctx.from.id, (newApi) => {
       currentApi = newApi;
+      resetMemberCacheLoaded();
       void onZaloLogin(newApi).catch((e: unknown) => console.error('[/loginweb] onZaloLogin error:', e));
     });
   });
@@ -472,6 +474,7 @@ export function setupTelegramHandler(
       });
 
       invalidateAppSession();
+      resetMemberCacheLoaded();
       currentApi = newApi;
       void onZaloLogin(newApi).catch((e: unknown) => console.error('[/loginapp] onZaloLogin error:', e));
       } catch (err) {
@@ -693,6 +696,9 @@ export function setupTelegramHandler(
         `Thành viên: <b>${totalMember ?? '?'}</b>`,
         `Đọc được tên: <b>${resolvedCount}/${memberUids.length}</b>`,
       ];
+      if (totalMember && memberUids.length < totalMember) {
+        headerLines.push(``, `⚠️ Nhóm đã bật chế độ ẩn danh sách thành viên. Web API chỉ trả ${memberUids.length}/${totalMember} người. Gõ <b>/loginapp</b> để đăng nhập App API rồi thử lại.`);
+      }
       if (!showAll && members.length > displayLimit) {
         headerLines.push(``, `ℹ️ Đang hiện ${displayLimit}/${members.length} người. Gõ <code>/group_info all</code> để xem hết.`);
       }

@@ -64,12 +64,31 @@ function parseBankCardHtml(html: string): BankCardInfo | null {
  * Fetch group member list and populate `userCache` so mention resolution works
  * immediately even before any group message is received.
  */
+/**
+ * Re-populate the member cache for a group by re-fetching from the PC App API.
+ * Called when app-session becomes available (e.g. after /loginapp).
+ */
+export async function refreshGroupMemberCache(api: ZaloAPI, groupId: string): Promise<void> {
+  if (_memberCacheLoaded.has(groupId)) {
+    _memberCacheLoaded.delete(groupId);
+  }
+  await populateGroupMemberCache(api, groupId);
+}
+
 async function populateGroupMemberCache(api: ZaloAPI, groupId: string): Promise<void> {
   try {
+    const totalMember = await (async () => {
+      const info = await api.getGroupInfo(groupId) as { gridInfoMap?: Record<string, { totalMember?: number }> };
+      return info?.gridInfoMap?.[groupId]?.totalMember;
+    })().catch(() => undefined);
+
     // --- Step 1: try PC App endpoint first (group-wpa.zaloapp.com, separate rate-limit) ---
     let groupData = await appGetGroupInfo(groupId);
+    let usedFallback = false;
 
     if (!groupData) {
+      usedFallback = true;
+      console.warn(`[Zalo] PC App API unavailable for group ${groupId}, falling back to web API (limited for hidden-member groups). Run /loginapp for full data.`);
       // Fallback: zca-js web API (rate-limited)
       const info = await api.getGroupInfo(groupId) as {
         gridInfoMap?: Record<string, {
@@ -101,7 +120,15 @@ async function populateGroupMemberCache(api: ZaloAPI, groupId: string): Promise<
 
     if (allUids.length === 0) {
       console.warn(`[Zalo] group ${groupId}: empty memVerList (totalMember=${groupData.totalMember})`);
+      if (totalMember && totalMember > 0) {
+        console.warn(`[Zalo] → Group has ${totalMember} members but API returned no member IDs. The group likely has "hide member list" enabled. Run /loginapp to enable full member scanning via PC App API.`);
+      }
       return;
+    }
+
+    // Detect hidden-member group: web API returns only admins, PC App returns all
+    if (usedFallback && totalMember && allUids.length < totalMember) {
+      console.warn(`[Zalo] group ${groupId}: web API returned ${allUids.length}/${totalMember} members (likely hidden-member group). Run /loginapp for full list.`);
     }
 
     // Save immediately for members already covered by currentMems
@@ -147,7 +174,8 @@ async function populateGroupMemberCache(api: ZaloAPI, groupId: string): Promise<
     }
 
     console.log(`[Zalo] Cached ${saved}/${allUids.length} members for group ${groupId}` +
-      (missingUids.length ? ` (currentMems: ${knownNames.size}, extra fetch: ${missingUids.length})` : ' (all from currentMems)'));
+      (missingUids.length ? ` (currentMems: ${knownNames.size}, extra fetch: ${missingUids.length})` : ' (all from currentMems)') +
+      (usedFallback && totalMember && allUids.length < totalMember ? ` — partial! Run /loginapp for full ${totalMember} members` : ''));
   } catch (err) {
     console.warn(`[Zalo] populateGroupMemberCache failed for ${groupId}:`, err);
   }
@@ -475,6 +503,11 @@ function buildScoreText(header: string, options: Pick<PollOptions, 'content' | '
 
 /** Track which groups already had their member cache populated this session. */
 const _memberCacheLoaded = new Set<string>();
+
+/** Clear the loaded-set so the next setupZaloHandler re-populates all groups. */
+export function resetMemberCacheLoaded(): void {
+  _memberCacheLoaded.clear();
+}
 
 /**
  * In-flight dedup set — holds msgIds that are currently being processed.
