@@ -1,5 +1,11 @@
 # Release Notes
 
+## Unreleased - 2026-09-04 07:38 +07
+
+Generated before push from commits:
+
+- `959f34d` ci: avoid failing on known non-critical advisories
+
 ## Unreleased - 2026-09-04 07:37 +07
 
 Generated before push from commits:
