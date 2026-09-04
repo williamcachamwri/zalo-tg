@@ -1,5 +1,11 @@
 # Release Notes
 
+## Unreleased - 2026-09-04 07:37 +07
+
+Generated before push from commits:
+
+- `51c75aa` fix: override xmldom security advisory
+
 ## Unreleased - 2026-09-04 07:36 +07
 
 Generated before push from commits:
