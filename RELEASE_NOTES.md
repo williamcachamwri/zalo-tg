@@ -1,5 +1,11 @@
 # Release Notes
 
+## Unreleased - 2026-09-04 07:36 +07
+
+Generated before push from commits:
+
+- `5a67bb0` fix: update vulnerable runtime dependencies
+
 ## Unreleased - 2026-09-04 07:03 +07
 
 Generated before push from commits:
