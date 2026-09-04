@@ -110,6 +110,10 @@ Copy [.env.example](.env.example) để có template đầy đủ. Bảng config
 | `ZALO_MUTE_SILENT` | `1` | app | `1` mirror thread Zalo đã mute thành tin Telegram silent; `0` luôn notify. |
 | `ZALO_DM_NATIVE_REACTION` | `1` | app | `1` hiển thị cảm xúc Zalo ở DM dạng native reaction trên tin nhắn; `0` luôn dùng reply tổng hợp `❤️ Tên` như nhóm. |
 | `ZALO_EXCLUDE_THREADS` | trống | app | Danh sách thread không mirror, phân tách bằng dấu phẩy: `type:id` (type `0`=DM, `1`=nhóm); id trần được coi là nhóm. Tin nhắn, cảm xúc, thu hồi từ thread bị loại sẽ bị bỏ qua hoàn toàn. |
+| `HTTP_API_ENABLED` | `0` | app | Bật API tự động hóa tích hợp `POST /send`, dùng chung phiên Zalo đang hoạt động. |
+| `HTTP_API_HOST` | `127.0.0.1` | app | Địa chỉ bind của HTTP API. Nên giữ loopback nếu không thật sự cần truy cập từ xa. |
+| `HTTP_API_PORT` | `3000` | app | Cổng TCP của HTTP API. |
+| `HTTP_API_TOKEN` | chưa đặt | app | Bearer token tùy chọn. Nên đặt khi bind ra ngoài loopback. |
 | `LOCAL_BOT_API` | `0` | app | `1` gửi request Telegram Bot API qua `TG_LOCAL_SERVER`; `0` dùng official `api.telegram.org`. |
 | `TG_LOCAL_SERVER` | `http://127.0.0.1:8081` | app / Compose override | Endpoint Local Bot API. Chỉ bắt buộc khi `LOCAL_BOT_API=1`; Compose override thành `http://telegram-bot-api:8081`. |
 | `TG_API_ID` | rỗng | Docker Compose | Telegram API ID cho container `telegram-bot-api`; lấy tại my.telegram.org. |

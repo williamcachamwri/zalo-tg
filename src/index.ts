@@ -8,6 +8,7 @@ import { startUpdateChecker } from './updater.js';
 import { store, userCache } from './store.js';
 import { registerShutdownHandler, requestShutdown } from './lifecycle.js';
 import { terminal } from './utils/terminal.js';
+import { startHttpApi, closeHttpApi } from './http-api.js';
 
 // ── Global safety net — prevent unhandled rejections from crashing ────────────
 process.on('unhandledRejection', (reason) => {
@@ -152,6 +153,13 @@ async function main(): Promise<void> {
   });
   _setZaloApi = setZaloApi;
 
+  // Built-in automation endpoint shares the active Zalo session. It starts
+  // before login so callers receive a clear 503 until Zalo is connected.
+  if (config.httpApi.enabled) {
+    startHttpApi({ getApi: () => _activeZaloApi });
+    terminal.status('http-api', `listening on ${config.httpApi.host}:${config.httpApi.port}`, 'success');
+  }
+
   // ── Register bot commands for Telegram menu ───────────────────────────────
   tgBot.telegram.setMyCommands([
     { command: 'login',          description: 'Đăng nhập Zalo qua QR code' },
@@ -186,6 +194,7 @@ async function main(): Promise<void> {
       _reconnectTimer = null;
     }
     try { _activeZaloApi?.listener.stop(); } catch { /* ignore */ }
+    try { await closeHttpApi(); } catch { /* ignore */ }
     try { await tgBot.stop(reason); } catch { /* bot may not have launched yet */ }
     // Let debounced msg/user-cache persistence finish before process exit.
     await new Promise(r => setTimeout(r, 2500));

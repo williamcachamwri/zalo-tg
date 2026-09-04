@@ -102,6 +102,7 @@ export const config = {
     excludeThreads: excludeThreads(),
   },
   httpApi: {
+    // Opt-in to avoid opening a listening socket for existing deployments.
     enabled: envFlag('HTTP_API_ENABLED'),
     host: process.env.HTTP_API_HOST?.trim() || '127.0.0.1',
     port: envPort('HTTP_API_PORT', 3000),

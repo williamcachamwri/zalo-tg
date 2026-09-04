@@ -66,8 +66,13 @@ async function readBody(req: IncomingMessage): Promise<Record<string, unknown>> 
 export function startHttpApi(options: HttpApiOptions): Server {
   if (server) return server;
   server = http.createServer(async (req, res) => {
-    if (req.method !== 'POST' || req.url !== '/send') {
+    if (req.url !== '/send') {
       json(res, 404, { ok: false, error: 'Not found' });
+      return;
+    }
+    if (req.method !== 'POST') {
+      res.setHeader('allow', 'POST');
+      json(res, 405, { ok: false, error: 'Method not allowed' });
       return;
     }
     if (config.httpApi.token && req.headers.authorization !== `Bearer ${config.httpApi.token}`) {
