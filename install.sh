@@ -5,8 +5,8 @@ APP_NAME="zalo-tg"
 APP_VERSION="1.0.0"
 MIN_NODE="20.11.0"
 MIN_GO="1.24.0"
-REPO_URL="${ZALO_TG_REPO:-https://github.com/williamcachamwri/zalo-tg.git}"
-RAW_INSTALL_URL="https://raw.githubusercontent.com/williamcachamwri/zalo-tg/main/install.sh"
+REPO_URL="${ZALO_TG_REPO:-https://github.com/leolionart/zalo-tg.git}"
+RAW_INSTALL_URL="https://raw.githubusercontent.com/leolionart/zalo-tg/main/install.sh"
 CALL_DIR=$(pwd)
 DEFAULT_INSTALL_DIR="$CALL_DIR/$APP_NAME"
 INSTALL_DIR="${ZALO_TG_INSTALL_DIR:-$DEFAULT_INSTALL_DIR}"
@@ -357,7 +357,7 @@ EOF
 # ─── Installer-only variables ──────────────────────────────────────────────
 # Export these before running install.sh if you need them.
 # ZALO_TG_INSTALL_DIR=$PWD/zalo-tg
-# ZALO_TG_REPO=https://github.com/williamcachamwri/zalo-tg.git
+# ZALO_TG_REPO=https://github.com/leolionart/zalo-tg.git
 EOF
 }
 
