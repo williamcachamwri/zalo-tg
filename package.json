@@ -16,6 +16,7 @@
   },
   "dependencies": {
     "@napi-rs/canvas": "^1.0.1",
+    "@xmldom/xmldom": "0.9.12",
     "adm-zip": "^0.6.0",
     "axios": "^1.20.0",
     "dotenv": "^16.4.5",
