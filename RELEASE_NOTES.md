@@ -1,5 +1,11 @@
 # Release Notes
 
+## Unreleased - 2026-09-06 06:36 +07
+
+Generated before push from commits:
+
+- `cd5108a` chore: make fork self-hosting and update-aware
+
 ## Unreleased - 2026-09-04 07:38 +07
 
 Generated before push from commits:
