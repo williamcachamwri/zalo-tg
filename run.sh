@@ -13,6 +13,8 @@ ok()   { printf "%b● %-10s%b %s\n" "$GREEN" "runner" "$RESET" "$1"; }
 warn() { printf "%b▲ %-10s%b %s\n" "$YELLOW" "runner" "$RESET" "$1"; }
 
 export ZALO_TG_RUNNER=1
+UPDATE_REMOTE="${ZALO_TG_UPDATE_REMOTE:-origin}"
+UPDATE_BRANCH="${ZALO_TG_UPDATE_BRANCH:-main}"
 
 while true; do
   if [ ! -f dist/index.js ]; then
@@ -30,8 +32,8 @@ while true; do
   if [ "$EXIT_CODE" = "42" ]; then
     warn "update requested (code 42)"
     
-    warn "updating · git pull origin main"
-    git pull --autostash origin main
+    warn "updating · git pull $UPDATE_REMOTE $UPDATE_BRANCH"
+    git pull --autostash "$UPDATE_REMOTE" "$UPDATE_BRANCH"
     if [ $? -ne 0 ]; then
       warn "git pull failed · update aborted"
       exit 1

@@ -12,12 +12,13 @@
     "test": "NODE_OPTIONS=--disable-warning=DEP0205 tsx --test tests/*.test.ts",
     "check": "npm run build && npm test",
     "test:coverage": "node --disable-warning=DEP0205 --import tsx --test --experimental-test-coverage tests/*.test.ts",
-    "security:audit": "npm audit --omit=dev"
+    "security:audit": "npm audit --omit=dev --audit-level=critical"
   },
   "dependencies": {
     "@napi-rs/canvas": "^1.0.1",
-    "adm-zip": "^0.5.17",
-    "axios": "^1.7.2",
+    "@xmldom/xmldom": "0.9.12",
+    "adm-zip": "^0.6.0",
+    "axios": "^1.20.0",
     "dotenv": "^16.4.5",
     "image-size": "^2.0.2",
     "qrcode": "^1.5.4",
@@ -37,5 +38,8 @@
   },
   "engines": {
     "node": ">=20.11"
+  },
+  "overrides": {
+    "@xmldom/xmldom": "0.9.12"
   }
 }

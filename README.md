@@ -1,12 +1,12 @@
 # Zalo ↔ Telegram Bridge
 
-[![CI](https://github.com/williamcachamwri/zalo-tg/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/williamcachamwri/zalo-tg/actions/workflows/ci.yml)
-[![Version](https://img.shields.io/github/package-json/v/williamcachamwri/zalo-tg?label=version)](https://github.com/williamcachamwri/zalo-tg)
+[![CI](https://github.com/leolionart/zalo-tg/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/leolionart/zalo-tg/actions/workflows/ci.yml)
+[![Version](https://img.shields.io/github/package-json/v/leolionart/zalo-tg?label=version)](https://github.com/leolionart/zalo-tg)
 [![Node.js](https://img.shields.io/badge/node-%3E%3D20.11-339933?logo=node.js&logoColor=white)](https://nodejs.org/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.4-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
-[![Last commit](https://img.shields.io/github/last-commit/williamcachamwri/zalo-tg)](https://github.com/williamcachamwri/zalo-tg/commits/main)
+[![Last commit](https://img.shields.io/github/last-commit/leolionart/zalo-tg)](https://github.com/leolionart/zalo-tg/commits/main)
 
-> A TypeScript bridge that mirrors Zalo direct messages and groups into Telegram forum topics, and sends replies from Telegram back to the correct Zalo conversation.
+> `leolionart/zalo-tg` is a self-hosted TypeScript bridge that mirrors Zalo direct messages and groups into Telegram forum topics, and sends replies from Telegram back to the correct Zalo conversation. This fork is the deployment source; the upstream repository is used only for deliberate, manual synchronization.
 
 Tiếng Việt: [README.vi.md](README.vi.md)
 
@@ -22,6 +22,16 @@ Tiếng Việt: [README.vi.md](README.vi.md)
 - optional Telegram Local Bot API mode lets large files and local file paths be handled more reliably.
 
 The bridge is designed as a single Telegram bot/router with one active Zalo account. The current codebase is intentionally single-account: Zalo API state, credentials, topic mappings and caches are global.
+
+### Built-in send API
+
+Set `HTTP_API_ENABLED=1` to expose a local `POST /send` endpoint. The JSON body requires `message` and exactly one target selector: `topicId`, `name` (case/diacritic-insensitive partial match), or `zaloId`. For an unmapped raw `zaloId`, also provide `type` (`user`/`group`). If configured, send `Authorization: Bearer <HTTP_API_TOKEN>`.
+
+```bash
+curl -X POST http://127.0.0.1:3000/send \
+  -H 'content-type: application/json' \
+  -d '{"topicId":41,"message":"Hello from automation!"}'
+```
 
 ## Requirements
 
@@ -42,19 +52,19 @@ Recommended one-line installer:
 macOS:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/williamcachamwri/zalo-tg/main/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/leolionart/zalo-tg/main/install.sh | sh
 ```
 
 Linux:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/williamcachamwri/zalo-tg/main/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/leolionart/zalo-tg/main/install.sh | sh
 ```
 
 Windows, through PowerShell plus Git Bash/WSL `sh`:
 
 ```powershell
-curl.exe -fsSL https://raw.githubusercontent.com/williamcachamwri/zalo-tg/main/install.sh -o install.sh
+curl.exe -fsSL https://raw.githubusercontent.com/leolionart/zalo-tg/main/install.sh -o install.sh
 sh install.sh
 ```
 
@@ -63,7 +73,7 @@ The curl installer clones or updates the project in `./zalo-tg` under your curre
 To choose another install directory:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/williamcachamwri/zalo-tg/main/install.sh | ZALO_TG_INSTALL_DIR=/opt/zalo-tg sh
+curl -fsSL https://raw.githubusercontent.com/leolionart/zalo-tg/main/install.sh | ZALO_TG_INSTALL_DIR=/opt/zalo-tg sh
 ```
 
 If you already cloned the repository:
@@ -75,7 +85,7 @@ sh install.sh
 For unattended setup:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/williamcachamwri/zalo-tg/main/install.sh | sh -s -- --yes
+curl -fsSL https://raw.githubusercontent.com/leolionart/zalo-tg/main/install.sh | sh -s -- --yes
 ```
 
 Manual setup:
@@ -109,6 +119,10 @@ Open [.env.example](.env.example) for the full template. Complete configuration 
 | `ZALO_MUTE_SILENT` | `1` | app | `1` mirrors Zalo muted threads as silent Telegram messages; `0` always notifies. |
 | `ZALO_DM_NATIVE_REACTION` | `1` | app | `1` shows Zalo reactions in DMs as native Telegram reactions on the message; `0` always uses the aggregated `❤️ Name` summary reply like groups. |
 | `ZALO_EXCLUDE_THREADS` | empty | app | Comma-separated threads to never mirror: `type:id` (type `0`=DM, `1`=group); bare ids count as groups. Their messages, reactions and recalls are ignored entirely. |
+| `HTTP_API_ENABLED` | `0` | app | Enables the built-in `POST /send` automation API. It uses the active Zalo session. |
+| `HTTP_API_HOST` | `127.0.0.1` | app | HTTP API bind address. Keep loopback unless remote access is explicitly required. |
+| `HTTP_API_PORT` | `3000` | app | HTTP API TCP port. |
+| `HTTP_API_TOKEN` | unset | app | Optional Bearer token. Recommended when binding beyond loopback. |
 | `LOCAL_BOT_API` | `0` | app | `1` sends Telegram Bot API calls to `TG_LOCAL_SERVER`; `0` uses official `api.telegram.org`. |
 | `TG_LOCAL_SERVER` | `http://127.0.0.1:8081` | app / Compose override | Local Bot API endpoint. Required only when `LOCAL_BOT_API=1`; Compose overrides it to `http://telegram-bot-api:8081`. |
 | `TG_API_ID` | empty | Docker Compose | Telegram API ID for the `telegram-bot-api` container; get it from my.telegram.org. |
@@ -132,6 +146,20 @@ Open [.env.example](.env.example) for the full template. Complete configuration 
 | `ZALO_TG_REPO` | this GitHub repo | installer only | Repository URL used by `install.sh`; export before running the installer. |
 
 After the bot starts, send `/login` in the Telegram group or in a private chat with the bot. Scan the QR code with Zalo. When login succeeds, the bridge starts listening and creates topics as conversations appear.
+
+### Update policy
+
+For a source checkout, `./run.sh` is the supported supervised runtime. The periodic checker and `/update` command use the current branch's configured Git remote; set `ZALO_TG_UPDATE_REMOTE` and `ZALO_TG_UPDATE_BRANCH` when needed. In this fork, the normal source is `origin` → `https://github.com/leolionart/zalo-tg.git`; keep the upstream repo as a separate remote for manual review only. The update flow fetches/pulls, installs dependencies, builds, and restarts through exit code 42.
+
+Docker images do not contain `.git` or a package manager, so `/update` cannot update a running container. Update Docker deployments from the host instead:
+
+```bash
+git pull origin main
+docker compose build --pull zalo-tg
+docker compose up -d zalo-tg
+```
+
+Keep `.env`, `data/`, and `credentials.json` outside Git. The bridge currently supports one active Zalo account per checkout.
 
 ## Scripts
 

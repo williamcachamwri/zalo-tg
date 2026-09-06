@@ -29,6 +29,16 @@ function envFlag(key: string, defaultValue = false): boolean {
   return ['1', 'true', 'yes', 'on'].includes(raw.trim().toLowerCase());
 }
 
+function envPort(key: string, defaultValue: number): number {
+  const raw = process.env[key];
+  if (raw === undefined || raw.trim() === '') return defaultValue;
+  const value = Number(raw);
+  if (!Number.isInteger(value) || value < 1 || value > 65535) {
+    throw new Error(`${key} must be a TCP port between 1 and 65535`);
+  }
+  return value;
+}
+
 /**
  * Parse ZALO_EXCLUDE_THREADS: comma-separated "type:id" pairs or bare ids.
  * type: 0 = DM, 1 = group. Bare ids are treated as groups ("1:id").
@@ -90,6 +100,13 @@ export const config = {
     // Threads to never mirror, as "type:id" pairs (type 0=DM, 1=group).
     // Bare ids are treated as groups. Messages from these threads are ignored.
     excludeThreads: excludeThreads(),
+  },
+  httpApi: {
+    // Opt-in to avoid opening a listening socket for existing deployments.
+    enabled: envFlag('HTTP_API_ENABLED'),
+    host: process.env.HTTP_API_HOST?.trim() || '127.0.0.1',
+    port: envPort('HTTP_API_PORT', 3000),
+    token: process.env.HTTP_API_TOKEN?.trim() || undefined,
   },
   dataDir: resolvePath(process.env.DATA_DIR, 'data'),
 } as const;

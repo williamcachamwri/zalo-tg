@@ -1,12 +1,12 @@
 # Cầu nối Zalo ↔ Telegram
 
-[![CI](https://github.com/williamcachamwri/zalo-tg/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/williamcachamwri/zalo-tg/actions/workflows/ci.yml)
-[![Phiên bản](https://img.shields.io/github/package-json/v/williamcachamwri/zalo-tg?label=version)](https://github.com/williamcachamwri/zalo-tg)
+[![CI](https://github.com/leolionart/zalo-tg/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/leolionart/zalo-tg/actions/workflows/ci.yml)
+[![Phiên bản](https://img.shields.io/github/package-json/v/leolionart/zalo-tg?label=version)](https://github.com/leolionart/zalo-tg)
 [![Node.js](https://img.shields.io/badge/node-%3E%3D20.11-339933?logo=node.js&logoColor=white)](https://nodejs.org/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.4-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
-[![Commit mới nhất](https://img.shields.io/github/last-commit/williamcachamwri/zalo-tg)](https://github.com/williamcachamwri/zalo-tg/commits/main)
+[![Commit mới nhất](https://img.shields.io/github/last-commit/leolionart/zalo-tg)](https://github.com/leolionart/zalo-tg/commits/main)
 
-> Bridge TypeScript đồng bộ tin nhắn Zalo DM/nhóm sang Telegram forum topic, và gửi tin nhắn từ Telegram ngược về đúng hội thoại Zalo.
+> `leolionart/zalo-tg` là bridge TypeScript tự host đồng bộ tin nhắn Zalo DM/nhóm sang Telegram forum topic, và gửi tin nhắn từ Telegram ngược về đúng hội thoại Zalo. Fork này là nguồn triển khai chính; repo upstream chỉ dùng để đồng bộ thủ công có kiểm soát.
 
 English: [README.md](README.md)
 
@@ -42,19 +42,19 @@ Installer một dòng khuyến nghị:
 macOS:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/williamcachamwri/zalo-tg/main/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/leolionart/zalo-tg/main/install.sh | sh
 ```
 
 Linux:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/williamcachamwri/zalo-tg/main/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/leolionart/zalo-tg/main/install.sh | sh
 ```
 
 Windows, chạy bằng PowerShell kèm Git Bash/WSL `sh`:
 
 ```powershell
-curl.exe -fsSL https://raw.githubusercontent.com/williamcachamwri/zalo-tg/main/install.sh -o install.sh
+curl.exe -fsSL https://raw.githubusercontent.com/leolionart/zalo-tg/main/install.sh -o install.sh
 sh install.sh
 ```
 
@@ -63,7 +63,7 @@ Installer qua curl mặc định clone hoặc update project vào `~/zalo-tg`, s
 Muốn chọn thư mục cài khác:
 
 ```bash
-ZALO_TG_INSTALL_DIR=/opt/zalo-tg curl -fsSL https://raw.githubusercontent.com/williamcachamwri/zalo-tg/main/install.sh | sh
+ZALO_TG_INSTALL_DIR=/opt/zalo-tg curl -fsSL https://raw.githubusercontent.com/leolionart/zalo-tg/main/install.sh | sh
 ```
 
 Nếu đã clone repo sẵn:
@@ -75,7 +75,7 @@ sh install.sh
 Nếu muốn chạy không hỏi:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/williamcachamwri/zalo-tg/main/install.sh | sh -s -- --yes
+curl -fsSL https://raw.githubusercontent.com/leolionart/zalo-tg/main/install.sh | sh -s -- --yes
 ```
 
 Cài thủ công:
@@ -110,6 +110,10 @@ Copy [.env.example](.env.example) để có template đầy đủ. Bảng config
 | `ZALO_MUTE_SILENT` | `1` | app | `1` mirror thread Zalo đã mute thành tin Telegram silent; `0` luôn notify. |
 | `ZALO_DM_NATIVE_REACTION` | `1` | app | `1` hiển thị cảm xúc Zalo ở DM dạng native reaction trên tin nhắn; `0` luôn dùng reply tổng hợp `❤️ Tên` như nhóm. |
 | `ZALO_EXCLUDE_THREADS` | trống | app | Danh sách thread không mirror, phân tách bằng dấu phẩy: `type:id` (type `0`=DM, `1`=nhóm); id trần được coi là nhóm. Tin nhắn, cảm xúc, thu hồi từ thread bị loại sẽ bị bỏ qua hoàn toàn. |
+| `HTTP_API_ENABLED` | `0` | app | Bật API tự động hóa tích hợp `POST /send`, dùng chung phiên Zalo đang hoạt động. |
+| `HTTP_API_HOST` | `127.0.0.1` | app | Địa chỉ bind của HTTP API. Nên giữ loopback nếu không thật sự cần truy cập từ xa. |
+| `HTTP_API_PORT` | `3000` | app | Cổng TCP của HTTP API. |
+| `HTTP_API_TOKEN` | chưa đặt | app | Bearer token tùy chọn. Nên đặt khi bind ra ngoài loopback. |
 | `LOCAL_BOT_API` | `0` | app | `1` gửi request Telegram Bot API qua `TG_LOCAL_SERVER`; `0` dùng official `api.telegram.org`. |
 | `TG_LOCAL_SERVER` | `http://127.0.0.1:8081` | app / Compose override | Endpoint Local Bot API. Chỉ bắt buộc khi `LOCAL_BOT_API=1`; Compose override thành `http://telegram-bot-api:8081`. |
 | `TG_API_ID` | rỗng | Docker Compose | Telegram API ID cho container `telegram-bot-api`; lấy tại my.telegram.org. |
@@ -130,6 +134,20 @@ Copy [.env.example](.env.example) để có template đầy đủ. Bảng config
 | `ZALO_TG_REPO` | repo GitHub này | chỉ installer | URL repo mà `install.sh` clone; export trước khi chạy installer. |
 
 Sau khi bot chạy, gửi `/login` trong group Telegram hoặc nhắn riêng với bot. Quét QR bằng Zalo. Khi đăng nhập thành công, bridge bắt đầu listen và tự tạo topic khi có hội thoại xuất hiện.
+
+### Chính sách cập nhật
+
+Với source checkout, dùng `./run.sh` để chạy dưới supervisor. Periodic checker và lệnh `/update` dùng remote Git của branch hiện tại; có thể đặt `ZALO_TG_UPDATE_REMOTE` và `ZALO_TG_UPDATE_BRANCH`. Với fork này, source chính là `origin` → `https://github.com/leolionart/zalo-tg.git`; giữ upstream thành remote riêng để xem xét và đồng bộ thủ công. Luồng update sẽ fetch/pull, cài dependency, build và restart qua exit code 42.
+
+Docker image không có `.git` và package manager nên `/update` không thể tự cập nhật container đang chạy. Hãy cập nhật Docker từ host:
+
+```bash
+git pull origin main
+docker compose build --pull zalo-tg
+docker compose up -d zalo-tg
+```
+
+Giữ `.env`, `data/` và `credentials.json` ngoài Git. Mỗi checkout hiện chỉ hỗ trợ một Zalo account đang hoạt động.
 
 ## Scripts
 
