@@ -22,13 +22,46 @@ function normalized(value: string): string {
   return value.normalize('NFD').replace(/\p{Mn}/gu, '').toLowerCase().trim().replace(/\s+/g, ' ');
 }
 
+const SELECTORS = ['topicId', 'name', 'zaloId'] as const;
+
+function hasSelectorValue(value: unknown): boolean {
+  return value !== undefined && value !== null
+    && (typeof value !== 'string' || value.trim() !== '');
+}
+
+function parseTopicId(value: unknown): number | null {
+  if (typeof value === 'number') return Number.isSafeInteger(value) ? value : null;
+  if (typeof value === 'string' && /^\d+$/.test(value.trim())) {
+    const parsed = Number(value.trim());
+    return Number.isSafeInteger(parsed) ? parsed : null;
+  }
+  return null;
+}
+
+function parseZaloId(value: unknown): string | null {
+  if (typeof value === 'string' && value.trim()) return value.trim();
+  if (typeof value === 'number' && Number.isSafeInteger(value)) return String(value);
+  return null;
+}
+
+function parseThreadType(value: unknown): 0 | 1 | undefined {
+  if (value === 'group' || value === 1 || value === '1') return 1;
+  if (value === 'user' || value === 0 || value === '0') return 0;
+  return undefined;
+}
+
+export function selectorKeys(body: Record<string, unknown>): string[] {
+  return SELECTORS.filter((key) => hasSelectorValue(body[key]));
+}
+
 export function resolveTarget(body: Record<string, unknown>): TopicEntry | { zaloId: string; type: 0 | 1 } | null {
-  const selectors = ['topicId', 'name', 'zaloId'].filter((key) => body[key] !== undefined && body[key] !== null && body[key] !== '');
+  const selectors = selectorKeys(body);
   if (selectors.length !== 1) return null;
   const selector = selectors[0];
   if (selector === 'topicId') {
-    if (!Number.isSafeInteger(body.topicId)) return null;
-    return store.getEntryByTopic(body.topicId as number) ?? null;
+    const topicId = parseTopicId(body.topicId);
+    if (topicId === null) return null;
+    return store.getEntryByTopic(topicId) ?? null;
   }
   if (selector === 'name') {
     if (typeof body.name !== 'string') return null;
@@ -36,13 +69,12 @@ export function resolveTarget(body: Record<string, unknown>): TopicEntry | { zal
     const matches = store.all().filter((entry) => normalized(entry.name).includes(query));
     return matches.length === 1 ? matches[0] : null;
   }
-  if (typeof body.zaloId !== 'string' || !body.zaloId.trim()) return null;
-  const id = body.zaloId.trim();
+  const id = parseZaloId(body.zaloId);
+  if (id === null) return null;
   const matches = store.all().filter((entry) => entry.zaloId === id);
   if (matches.length === 1) return matches[0];
   if (matches.length > 1) return null;
-  const rawType = body.type;
-  const type = rawType === 'group' || rawType === 1 ? 1 : rawType === 'user' || rawType === 0 ? 0 : undefined;
+  const type = parseThreadType(body.type);
   return type === undefined ? null : { zaloId: id, type };
 }
 
@@ -85,9 +117,18 @@ export function startHttpApi(options: HttpApiOptions): Server {
         json(res, 422, { ok: false, error: 'message must be a non-empty string (max 10000 characters)' });
         return;
       }
+      const selectors = selectorKeys(body);
+      if (selectors.length !== 1) {
+        json(res, 422, { ok: false, error: 'Provide exactly one target selector: topicId, name, or zaloId' });
+        return;
+      }
       const target = resolveTarget(body);
       if (!target) {
-        json(res, 404, { ok: false, error: 'Target not found or ambiguous; use exactly one selector and type for unknown zaloId' });
+        if (selectors[0] === 'zaloId' && parseThreadType(body.type) === undefined) {
+          json(res, 422, { ok: false, error: 'type is required for an unmapped zaloId (use user or group)' });
+          return;
+        }
+        json(res, 404, { ok: false, error: 'Target not found or ambiguous' });
         return;
       }
       const api = options.getApi();
