@@ -1,5 +1,11 @@
 # Release Notes
 
+## Unreleased - 2026-09-06 07:05 +07
+
+Generated before push from commits:
+
+- `1c43d5d` fix: accept n8n selector values robustly
+
 ## Unreleased - 2026-09-06 06:36 +07
 
 Generated before push from commits:
