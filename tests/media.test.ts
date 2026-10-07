@@ -144,3 +144,13 @@ test('downloadToTempFromCandidates falls back when the preferred URL is unavaila
 test('cleanTemp is idempotent for missing paths', async () => {
   await cleanTemp(path.join(os.tmpdir(), `missing-${process.pid}-${Date.now()}`));
 });
+
+test('downloadToTemp handles file URLs with Docker hostname from local Bot API', async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'zalo-tg-docker-host-'));
+  const src = path.join(dir, 'test.txt');
+  await writeFile(src, 'docker-payload', 'utf8');
+  const dockerUrl = `file://telegram-bot-api${src}`;
+  const copied = await downloadToTemp(dockerUrl, 'docker-test.txt');
+  assert.equal(await readFile(copied, 'utf8'), 'docker-payload');
+  await cleanTemp(copied);
+});
