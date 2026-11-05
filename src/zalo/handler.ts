@@ -8,6 +8,7 @@ import QRCode from 'qrcode';
 import type { ZaloAPI, ZaloMessage, ZaloMediaContent, ZaloGroupInfoResponse } from './types.js';
 import { appGetGroupInfo, appGetGroupMembersInfo } from './appApi.js';
 import { extractReactionTargetMsgIds } from './reaction.js';
+import { fetchEcardReminderTitle, parseEcardReminderRef } from './reminder.js';
 import { ZALO_MSG_TYPES } from './types.js';
 import { store } from '../store.js';
 import { tgBot } from '../telegram/bot.js';
@@ -186,6 +187,7 @@ async function populateGroupMemberCache(api: ZaloAPI, groupId: string): Promise<
 interface GroupInfoEntry { name: string; avt?: string; ts: number }
 const _groupInfoCache = new Map<string, GroupInfoEntry>();
 const GROUP_INFO_TTL = 5 * 60 * 1000; // 5 min
+const TG_CAPTION_LIMIT = 1024; // Telegram photo caption limit
 
 async function getCachedGroupInfo(
   api: ZaloAPI,
@@ -1803,13 +1805,28 @@ export async function setupZaloHandler(api: ZaloAPI): Promise<void> {
 
       // ── 13. E-card (birthday / event notification) ────────────────────────
       if (msgType === ZALO_MSG_TYPES.ECARD) {
-        const ecardTitle = media.title ?? '';
+        let ecardTitle   = media.title ?? '';
         const ecardDesc  = media.description ?? '';
         let ecardNotify  = '';
         try {
           const p = JSON.parse(media.params ?? '{}') as { notifyTxt?: string };
           ecardNotify = p.notifyTxt ?? '';
         } catch { /* ignore */ }
+
+        // Zalo truncates reminder e-cards; read the full text from the reminder board.
+        const reminderRef = parseEcardReminderRef(media.params);
+        if (reminderRef) {
+          try {
+            const fullTitle = await fetchEcardReminderTitle(api, reminderRef, zaloId);
+            if (fullTitle) {
+              const emoji = ecardTitle.match(/^\p{Extended_Pictographic}️?\s*/u)?.[0] ?? '';
+              ecardTitle  = `${emoji}${fullTitle}`;
+              ecardNotify = '';
+            }
+          } catch (err) {
+            console.warn('[Zalo] Could not read full reminder text:', err);
+          }
+        }
 
         const lines: string[] = [];
         if (type === ThreadType.Group) lines.push(groupCaption(bridgeSenderName));
@@ -1818,7 +1835,8 @@ export async function setupZaloHandler(api: ZaloAPI): Promise<void> {
         if (ecardNotify) lines.push(`<i>${escapeHtml(ecardNotify)}</i>`);
         const ecardCaption = lines.join('\n');
 
-        const imgUrl = media.href;
+        // Telegram photo captions stop at 1024 characters; longer reminders go out as text.
+        const imgUrl = ecardCaption.replace(/<[^>]+>/g, '').length <= TG_CAPTION_LIMIT ? media.href : undefined;
         if (imgUrl) {
           try {
             const localPath = await downloadToTemp(imgUrl, `ecard_${Date.now()}.png`);
