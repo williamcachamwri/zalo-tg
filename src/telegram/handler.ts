@@ -2854,9 +2854,15 @@ sentMsgStore.save(msg.message_id, { msgIds: [zaloMsgId], zaloId, threadType });
       }
 
       if ('animation' in msg && msg.animation) {
-        const fname = msg.animation.file_name ?? 'animation.gif';
+        // Telegram converts GIF-picker items to MP4. The original file_name
+        // often still ends in .gif, which would make zca-js decode MP4 bytes as
+        // a GIF; force .mp4 so it goes through the playable-video path.
+        const anim = msg.animation;
+        const fname = anim.mime_type === 'video/mp4'
+          ? (anim.file_name ? `${anim.file_name.replace(/\.[^./\\]+$/, '')}.mp4` : `animation_${msg.message_id}.mp4`)
+          : (anim.file_name ?? 'animation.gif');
         const { cap, capMentions } = getCaptionMentions();
-        await sendAttachment(msg.animation.file_id, fname, msg.animation.file_size, cap, capMentions);
+        await sendAttachment(anim.file_id, fname, anim.file_size, cap, capMentions);
         return;
       }
 
@@ -3097,7 +3103,8 @@ sentMsgStore.save(msg.message_id, { msgIds: [zaloMsgId], zaloId, threadType });
             tgsPath = await downloadToTemp(fileLink.toString(), `sticker_${Date.now()}.tgs`);
             gifPath = await convertTgsToGif(tgsPath);
             await sendRenderedSticker(gifPath);
-            console.log(`[TG→Zalo] TGS sticker rendered as GIF: msgId=${msg.message_id}`);
+            const gifKb = Math.round((await stat(gifPath)).size / 1024);
+            console.log(`[TG→Zalo] TGS sticker rendered as GIF: msgId=${msg.message_id} (${gifKb} KB)`);
           } catch (err) {
             console.error('[TG→Zalo] sticker tgs→gif failed, falling back to thumbnail:', err);
             const thumbId = sticker.thumbnail?.file_id;
