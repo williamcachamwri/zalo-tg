@@ -41,7 +41,14 @@ export async function downloadToTemp(url: string, fileName?: string, retries = 3
 
   // Local Bot API server returns file:// paths — copy directly, no HTTP needed
   if (url.startsWith('file:')) {
-    const srcPath = fileURLToPath(url);
+    let srcPath: string;
+    try {
+      srcPath = fileURLToPath(url);
+    } catch {
+      // Telegraf preserves custom apiRoot hostname in file:// URLs (e.g. file://telegram-bot-api/...),
+      // which fileURLToPath rejects on POSIX. Normalize to file:/// (empty host) and retry.
+      srcPath = fileURLToPath(url.replace(/^file:\/\/[^\/]+/, 'file://'));
+    }
     const baseName = sanitizeFileName(fileName ?? path.basename(srcPath));
     const destPath = path.join(TMP_DIR, `${Date.now()}_${Math.random().toString(36).slice(2, 7)}_${baseName}`);
     try {
@@ -54,6 +61,13 @@ export async function downloadToTemp(url: string, fileName?: string, retries = 3
         throw new Error(
           `Local Bot API file is not visible to the bridge: ${srcPath}. `
           + 'Mount TELEGRAM_WORK_DIR at the same absolute path in both processes.',
+          { cause: err },
+        );
+      }
+      if (code === 'EACCES') {
+        throw new Error(
+          `Local Bot API file cannot be read due to permissions: ${srcPath}. `
+          + 'Ensure the bridge container has read permissions (e.g. group_add: ["101"]).',
           { cause: err },
         );
       }
