@@ -1,4 +1,4 @@
-module github.com/williamcachamwri/zalo-tg
+module github.com/leolionart/zalo-tg
 
 go 1.24.2
 

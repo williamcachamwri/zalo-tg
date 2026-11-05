@@ -1,4 +1,4 @@
-import { execSync } from 'child_process';
+import { execFileSync } from 'child_process';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import type { Context, Telegraf, Telegram } from 'telegraf';
@@ -12,16 +12,50 @@ const PROJECT_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), 
 let _notifiedCommit: string | null = null;
 let _isUpdating = false;
 
-function gitExec(cmd: string): string {
-  return execSync(cmd, { cwd: PROJECT_ROOT, stdio: 'pipe' }).toString().trim();
+function gitExec(...args: string[]): string {
+  return execFileSync('git', args, { cwd: PROJECT_ROOT, stdio: 'pipe' }).toString().trim();
+}
+
+function gitConfig(key: string): string {
+  try {
+    return gitExec('config', '--get', key);
+  } catch {
+    return '';
+  }
+}
+
+function updateTarget(): { remote: string; branch: string } {
+  const currentBranch = (() => {
+    try { return gitExec('symbolic-ref', '--short', 'HEAD'); } catch { return ''; }
+  })();
+  const branch = process.env.ZALO_TG_UPDATE_BRANCH?.trim()
+    || currentBranch
+    || 'main';
+  const configuredRemote = currentBranch
+    ? gitConfig(`branch.${currentBranch}.remote`)
+    : '';
+  const remote = process.env.ZALO_TG_UPDATE_REMOTE?.trim()
+    || configuredRemote
+    || 'origin';
+  if (!/^[A-Za-z0-9._/-]+$/.test(remote) || !/^[A-Za-z0-9._/-]+$/.test(branch)) {
+    throw new Error('Invalid update remote or branch name');
+  }
+  return { remote, branch };
+}
+
+function updateRef(): string {
+  const { remote, branch } = updateTarget();
+  return `${remote}/${branch}`;
 }
 
 function getNewCommit(): string | null {
   try {
-    gitExec('git fetch origin main --quiet');
-    const behind = gitExec('git log HEAD..origin/main --oneline');
+    const { remote, branch } = updateTarget();
+    gitExec('fetch', remote, branch, '--quiet');
+    const ref = `${remote}/${branch}`;
+    const behind = gitExec('log', `HEAD..${ref}`, '--oneline');
     if (!behind) return null;
-    return gitExec('git rev-parse --short origin/main');
+    return gitExec('rev-parse', '--short', ref);
   } catch {
     return null;
   }
@@ -29,7 +63,7 @@ function getNewCommit(): string | null {
 
 function getChangelog(): string {
   try {
-    return gitExec('git log HEAD..origin/main --oneline --no-merges');
+    return gitExec('log', `HEAD..${updateRef()}`, '--oneline', '--no-merges');
   } catch {
     return '';
   }
@@ -79,8 +113,9 @@ export function startUpdateChecker(bot: Telegraf): void {
         { parse_mode: 'HTML' },
       ).catch(() => undefined);
 
-      // 1. git pull (--autostash handles unstaged changes when pull.rebase=true)
-      execSync('git pull --autostash origin main', { cwd: PROJECT_ROOT, stdio: 'pipe', timeout: 120_000 });
+      // 1. git pull from the configured fork/update remote.
+      const { remote, branch } = updateTarget();
+      execFileSync('git', ['pull', '--autostash', remote, branch], { cwd: PROJECT_ROOT, stdio: 'pipe', timeout: 120_000 });
 
       await ctx.editMessageText(
         '⏳ <b>Đang cập nhật...</b>\n\n✅ git pull\nnpm install...',
@@ -88,7 +123,7 @@ export function startUpdateChecker(bot: Telegraf): void {
       ).catch(() => undefined);
 
       // 2. npm install
-      execSync('npm install', { cwd: PROJECT_ROOT, stdio: 'pipe', timeout: 180_000 });
+      execFileSync('npm', ['install'], { cwd: PROJECT_ROOT, stdio: 'pipe', timeout: 180_000 });
 
       await ctx.editMessageText(
         '⏳ <b>Đang cập nhật...</b>\n\n✅ git pull\n✅ npm install\nnpm run build...',
@@ -96,9 +131,9 @@ export function startUpdateChecker(bot: Telegraf): void {
       ).catch(() => undefined);
 
       // 3. build
-      execSync('npm run build', { cwd: PROJECT_ROOT, stdio: 'pipe', timeout: 120_000 });
+      execFileSync('npm', ['run', 'build'], { cwd: PROJECT_ROOT, stdio: 'pipe', timeout: 120_000 });
 
-      const isRunner = !!process.env.ZALO_TG_RUNNER;
+      const isRunner = process.env.ZALO_TG_RUNNER === '1';
       if (isRunner) {
         await ctx.editMessageText(
           '✅ <b>Cập nhật thành công!</b>\nĐang khởi động lại...',
